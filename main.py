@@ -2,7 +2,7 @@
 import os
 import csv
 import datetime
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, redirect, url_for
 import requests
 
 app = Flask(__name__)
@@ -14,8 +14,8 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "TU_TOKEN_DE_BOT")
 CHAT_ID_VIP = os.environ.get("TELEGRAM_CHAT_ID_VIP", "ID_CANAL_VIP")
 CHAT_ID_GRATIS = os.environ.get("TELEGRAM_CHAT_ID_GRATIS", "ID_CANAL_GRATIS")
 
-WHATSAPP_PHONE = "TU_NUMERO_CON_CODIGO_DE_PAIS" 
-WHATSAPP_API_KEY = "TU_API_KEY_DE_CALLMEBOT"
+WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE", "TU_NUMERO")
+WHATSAPP_API_KEY = os.environ.get("WHATSAPP_API_KEY", "TU_API_KEY")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REGISTRO_PATH = os.path.join(BASE_DIR, "registro.csv")
@@ -37,17 +37,21 @@ PAGINA_INICIO = """
         button { width: 100%; background: #0284c7; color: white; padding: 14px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; margin-top: 25px; cursor: pointer; transition: background 0.2s; }
         button:hover { background: #0369a1; }
         .footer { text-align: center; margin-top: 25px; font-size: 11px; color: #64748b; }
+        .alerta-exito { background: #16a34a; color: white; padding: 12px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 15px; display: {% if msg %}block{% else %}none{% endif %}; }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>⚾ Panel de Control MLB</h2>
+        {% if msg %}
+        <div class="alerta-exito">✅ {{ msg }}</div>
+        {% endif %}
         <form action="/webhook-pick" method="POST">
             <label>Destino de Publicación:</label>
             <select name="tipo_grupo">
-                <option value="vip">🔒 Grupo VIP Premiun</option>
-                <option value="gratis">🔓 Grupo Gratis / Público</option>
                 <option value="ambos">🔄 Ambos Grupos</option>
+                <option value="vip">🔒 Grupo VIP Premium</option>
+                <option value="gratis">🔓 Grupo Gratis / Público</option>
             </select>
             
             <label>Partido / Evento:</label>
@@ -63,7 +67,7 @@ PAGINA_INICIO = """
             <input type="text" name="unidades" value="1.0" required>
 
             <label>Análisis Técnico:</label>
-            <textarea name="analisis" rows="3" placeholder="Estadísticas de la jugada..."></textarea>
+            <textarea name="analisis" rows="3" placeholder="Estadísticas de la jugada..." required></textarea>
 
             <button type="submit">🚀 Registrar y Publicar Pick</button>
         </form>
@@ -73,27 +77,22 @@ PAGINA_INICIO = """
 </html>
 """
 
-# ==========================================
-# FUNCIONES DE DESPACHO DE MENSAJES
-# ==========================================
 def despachar_telegram(mensaje, destino):
-    if "TU_TOKEN" in TELEGRAM_TOKEN: return
-    
+    if "TU_TOKEN" in TELEGRAM_TOKEN or not TELEGRAM_TOKEN: return
     chats = []
     if destino in ["gratis", "ambos"]: chats.append(CHAT_ID_GRATIS)
     if destino in ["vip", "ambos"]: chats.append(CHAT_ID_VIP)
-
     for chat_id in chats:
         url = f"https://telegram.org{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
-        try: requests.post(url, json=payload)
+        try: requests.post(url, json=payload, timeout=10)
         except: pass
 
 def despachar_whatsapp(mensaje, destino):
-    if "TU_API_KEY" in WHATSAPP_API_KEY: return
+    if "TU_API_KEY" in WHATSAPP_API_KEY or not WHATSAPP_API_KEY or "pendiente" in WHATSAPP_API_KEY: return
     if destino in ["vip", "ambos"]:
         url = f"https://callmebot.com{WHATSAPP_PHONE}&text={requests.utils.quote(mensaje)}&apikey={WHATSAPP_API_KEY}"
-        try: requests.get(url)
+        try: requests.get(url, timeout=10)
         except: pass
 
 def guardar_en_registro(fecha, evento, pronostico, cuota, unidades, destino):
@@ -115,57 +114,65 @@ def construir_plantilla_mensaje(etiqueta, fecha, evento, pronostico, cuota, unid
         f"📋 *Análisis Técnico:* {analisis}"
     )
 
-# ==========================================
-# RUTA DEL PROCESADOR LÓGICO
-# ==========================================
 @app.route('/', methods=['GET'])
 def inicio():
-    return render_template_string(PAGINA_INICIO)
+    msg = request.args.get('msg', '')
+    return render_template_string(PAGINA_INICIO, msg=msg)
 
 @app.route('/webhook-pick', methods=['POST'])
 def recibir_pick_automatico():
-    datos_recibidos = request.json or request.form
-    fecha_hoy = datetime.date.today().strftime("%Y-%m-%d")
+    # Detectar el Content-Type para procesar JSON o datos de formulario Web de forma segura
+    es_json = request.is_json
+    if es_json:
+        datos_recibidos = request.get_json()
+    else:
+        datos_recibidos = request.form
 
-    # Verificar si viene una lista de picks o un pick individual
-    picks_lista = datos_recibidos.get('picks', [])
+    fecha_hoy = datetime.date.today().strftime("%Y-%m-%d")
+    
+    # Procesar listas o elementos únicos
+    picks_lista = datos_recibidos.get('picks', []) if es_json else []
     if not picks_lista and datos_recibidos.get('evento'):
         picks_lista = [datos_recibidos]
 
     cantidad_picks = len(picks_lista)
 
-    # PANORAMA 1: No se enviaron picks en el JSON o el pick recibido marca "0" unidades (No hay pick disponible)
     if cantidad_picks == 0 or (cantidad_picks == 1 and str(picks_lista[0].get('unidades')) == '0'):
-        # Si la lista estaba vacía, creamos los parámetros predeterminados; si traía el objeto "vacio", tomamos su análisis
-        p_vacio = picks_lista[0] if cantidad_picks == 1 else {}
+        p_vacio = picks_lista[0] if cantidad_picks == 1 else datos_recibidos
         evento_texto = p_vacio.get('evento', f"Sin Pick Disponible — {fecha_hoy}")
         pronostico_texto = p_vacio.get('pronostico', "Sin pick hoy")
         cuota_texto = p_vacio.get('cuota', "—")
-        analisis_texto = p_vacio.get('analisis', "No hay pick disponible para el día de hoy. Así funciona Intelligence Suite cuando está bien calibrado, no jugar hoy no es una pérdida, es exactamente lo que protege el Récord y ROI de nuestra inversión.")
-        
+        analisis_texto = p_vacio.get('analisis', "No hay pick disponible para el día de hoy.")
+        tipo_grupo = p_vacio.get('tipo_grupo', 'ambos')
+
         mensaje_no_hay = construir_plantilla_mensaje(
             "⚠️ *AVISO OPERATIVO DE APUESTAS*", fecha_hoy, 
             evento_texto, pronostico_texto, cuota_texto, "0", analisis_texto
         )
         
-        guardar_en_registro(fecha_hoy, evento_texto, pronostico_texto, cuota_texto, "0", "Ambos")
-        despachar_telegram(mensaje_no_hay, "ambos")
-        despachar_whatsapp(mensaje_no_hay, "ambos")
-        return jsonify({"status": "success", "message": "Mensaje predeterminado de 'Sin Picks' enviado a ambos grupos"}), 200
+        guardar_en_registro(fecha_hoy, evento_texto, pronostico_texto, cuota_texto, "0", tipo_grupo)
+        despachar_telegram(mensaje_no_hay, tipo_grupo)
+        despachar_whatsapp(mensaje_no_hay, tipo_grupo)
+        
+        if es_json:
+            return jsonify({"status": "success", "message": "Mensaje enviado"}), 200
+        return redirect(url_for('inicio', msg="Aviso de 'Sin Picks' enviado correctamente."))
 
-    # PANORAMA 2: Se generó UN SOLO PICK de alta confianza (Se va a ambos grupos)
     elif cantidad_picks == 1:
         p = picks_lista[0]
+        tipo_grupo = p.get('tipo_grupo', 'ambos')
         mensaje = construir_plantilla_mensaje(
             "🚀 *PICK OFICIAL GLOBAL*", fecha_hoy, p.get('evento'), 
             p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), p.get('analisis', 'Análisis en desarrollo...')
         )
-        guardar_en_registro(fecha_hoy, p.get('evento'), p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), "Ambos")
-        despachar_telegram(mensaje, "ambos")
-        despachar_whatsapp(mensaje, "ambos")
-        return jsonify({"status": "success", "message": "Unico pick despachado de forma masiva"}), 200
+        guardar_en_registro(fecha_hoy, p.get('evento'), p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), tipo_grupo)
+        despachar_telegram(mensaje, tipo_grupo)
+        despachar_whatsapp(mensaje, tipo_grupo)
+        
+        if es_json:
+            return jsonify({"status": "success", "message": "Pick enviado"}), 200
+        return redirect(url_for('inicio', msg="Pick publicado con éxito."))
 
-    # PANORAMA 3: Se generaron VARIOS PICKS (El 1ero es gancho gratis, los demás van al VIP)
     else:
         for indice, p in enumerate(picks_lista):
             if indice == 0:
@@ -177,13 +184,13 @@ def recibir_pick_automatico():
 
             mensaje = construir_plantilla_mensaje(
                 etiqueta, fecha_hoy, p.get('evento'), 
-                p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), p.get('analisis', p.get('analisis', 'Análisis de valor premium.'))
+                p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), p.get('analisis', 'Análisis premium.')
             )
             guardar_en_registro(fecha_hoy, p.get('evento'), p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), destino)
             despachar_telegram(mensaje, destino)
             despachar_whatsapp(mensaje, destino)
 
-        return jsonify({"status": "success", "message": f"División de picks completada. {cantidad_picks} procesados."}), 200
+        return jsonify({"status": "success", "message": "Múltiples picks divididos correctamente."}), 200
 
 if __name__ == '__main__':
     puerto = int(os.environ.get("PORT", 5000))
