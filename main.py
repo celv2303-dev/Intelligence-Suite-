@@ -8,80 +8,79 @@ import requests
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN DE REDES SOCIALES VIP Y GRATIS
+# CONFIGURACIÓN DE REDES SOCIALES (VIP Y GRATIS)
 # ==========================================
-# TELEGRAM
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "TU_TOKEN_DE_BOT")
 CHAT_ID_VIP = os.environ.get("TELEGRAM_CHAT_ID_VIP", "ID_CANAL_VIP")
 CHAT_ID_GRATIS = os.environ.get("TELEGRAM_CHAT_ID_GRATIS", "ID_CANAL_GRATIS")
 
-# WHATSAPP (CallMeBot Gratis)
 WHATSAPP_PHONE = "TU_NUMERO_CON_CODIGO_DE_PAIS" 
 WHATSAPP_API_KEY = "TU_API_KEY_DE_CALLMEBOT"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REGISTRO_PATH = os.path.join(BASE_DIR, "registro.csv")
 
-# 🖥️ DISEÑO DE LA PÁGINA DE INICIO (PANEL DE CONTROL VISUAL)
+# 🖥️ DISEÑO DE LA PÁGINA DE INICIO (PANEL WEB MANUAL)
 PAGINA_INICIO = """
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel de Control - Picks MLB</title>
+    <title>Panel - Inteligencia MLB</title>
     <style>
-        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 100%; max-width: 500px; }
-        h2 { text-align: center; color: #1a365d; margin-bottom: 20px; }
-        label { font-weight: bold; color: #4a5568; display: block; margin-top: 15px; }
-        input, select, textarea { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
-        button { width: 100%; background: #3182ce; color: white; padding: 12px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; margin-top: 25px; cursor: pointer; transition: background 0.2s; }
-        button:hover { background: #2b6cb0; }
-        .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #718096; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; margin: 0; padding: 20px; display: flex; justify-content: center; color: #f8fafc; }
+        .container { background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); width: 100%; max-width: 500px; }
+        h2 { text-align: center; color: #38bdf8; margin-bottom: 25px; }
+        label { font-weight: bold; color: #cbd5e1; display: block; margin-top: 15px; }
+        input, select, textarea { width: 100%; padding: 12px; margin-top: 5px; background: #334155; border: 1px solid #475569; border-radius: 6px; color: white; font-size: 14px; }
+        button { width: 100%; background: #0284c7; color: white; padding: 14px; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; margin-top: 25px; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #0369a1; }
+        .footer { text-align: center; margin-top: 25px; font-size: 11px; color: #64748b; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>⚾ Automatización MLB Panel</h2>
+        <h2>⚾ Panel de Control MLB</h2>
         <form action="/webhook-pick" method="POST">
-            <label>Destino de Publicación:</label>
-            <select name="tipo_grupo">
-                <option value="vip">🔒 Grupo VIP Premiun</option>
-                <option value="gratis">🔓 Grupo Gratis / Público</option>
-                <option value="ambos">🔄 Ambos Grupos</option>
+            <label>Formato de Envío Manual:</label>
+            <select name="modo_manual">
+                <option value="formulario">Enviar un Pick Único</option>
+                <option value="no_hay_picks">Enviar Alerta: "Hoy No Hay Picks"</option>
             </select>
-
+            
             <label>Partido / Evento:</label>
-            <input type="text" name="evento" placeholder="Ej: Yankees vs Dodgers" required>
+            <input type="text" name="evento" placeholder="Ej: Yankees vs Dodgers">
 
             <label>Pronóstico:</label>
-            <input type="text" name="pronostico" placeholder="Ej: Yankees Ganador (Moneyline)" required>
+            <input type="text" name="pronostico" placeholder="Ej: Yankees Ganador">
 
             <label>Cuota:</label>
-            <input type="text" name="cuota" placeholder="Ej: 1.85" required>
+            <input type="text" name="cuota" placeholder="Ej: 1.85">
 
             <label>Stake / Unidades:</label>
-            <input type="text" name="unidades" value="1.0" required>
+            <input type="text" name="unidades" value="1.0">
 
             <label>Análisis Técnico:</label>
-            <textarea name="analisis" rows="4" placeholder="Escribe aquí las tendencias o estadísticas clave..."></textarea>
+            <textarea name="analisis" rows="3" placeholder="Estadísticas de la jugada..."></textarea>
 
-            <button type="submit">🚀 Registrar y Publicar Pick</button>
+            <button type="submit">🚀 Ejecutar Manualmente</button>
         </form>
-        <div class="footer">Intelligence Suite v2.0 - Sincronizado con Render</div>
+        <div class="footer">Servidor Activo Sincronizado para Recepción Automática a las 11:00 AM</div>
     </div>
 </body>
 </html>
 """
 
-def enviar_telegram(mensaje, destino):
+# ==========================================
+# FUNCIONES DE DESPACHO DE MENSAJES
+# ==========================================
+def despachar_telegram(mensaje, destino):
     if "TU_TOKEN" in TELEGRAM_TOKEN: return
     
-    # Determinar a qué chat enviarlo
-    if destino == "vip": chats = [CHAT_ID_VIP]
-    elif destino == "gratis": chats = [CHAT_ID_GRATIS]
-    else: chats = [CHAT_ID_VIP, CHAT_ID_GRATIS]
+    chats = []
+    if destino in ["gratis", "ambos"]: chats.append(CHAT_ID_GRATIS)
+    if destino in ["vip", "ambos"]: chats.append(CHAT_ID_VIP)
 
     for chat_id in chats:
         url = f"https://telegram.org{TELEGRAM_TOKEN}/sendMessage"
@@ -89,66 +88,114 @@ def enviar_telegram(mensaje, destino):
         try: requests.post(url, json=payload)
         except: pass
 
-def enviar_whatsapp_gratis(mensaje):
+def despachar_whatsapp(mensaje, destino):
     if "TU_API_KEY" in WHATSAPP_API_KEY: return
-    url = f"https://callmebot.com{WHATSAPP_PHONE}&text={requests.utils.quote(mensaje)}&apikey={WHATSAPP_API_KEY}"
-    try: requests.get(url)
-    except: pass
+    # WhatsApp se suele enfocar principalmente en clientes VIP o alertas generales
+    if destino in ["vip", "ambos"]:
+        url = f"https://callmebot.com{WHATSAPP_PHONE}&text={requests.utils.quote(mensaje)}&apikey={WHATSAPP_API_KEY}"
+        try: requests.get(url)
+        except: pass
 
+def guardar_en_registro(fecha, evento, pronostico, cuota, unidades, destino):
+    existe = os.path.exists(REGISTRO_PATH)
+    with open(REGISTRO_PATH, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if not existe:
+            writer.writerow(["Fecha", "Evento", "Pronostico", "Cuota", "Unidades", "Grupo Destino"])
+        writer.writerow([fecha, evento, pronostico, cuota, unidades, destino])
+
+def construir_plantilla_mensaje(etiqueta, fecha, evento, pronostico, cuota, unidades, analisis):
+    return (
+        f"{etiqueta} *MLB*\n\n"
+        f"📅 *Fecha:* {fecha}\n"
+        f"🔥 *Partido:* {evento}\n"
+        f"🎯 *Pronóstico:* {pronostico}\n"
+        f"📈 *Cuota:* {cuota}\n"
+        f"💰 *Stake Sugerido:* {unidades} U\n\n"
+        f"📋 *Análisis de Datos:* {analisis}"
+    )
+
+# ==========================================
+# RUTAS DEL PROCESADOR LÓGICO
+# ==========================================
 @app.route('/', methods=['GET'])
 def inicio():
     return render_template_string(PAGINA_INICIO)
 
-@app.route('/webhook-pick', methods=['GET', 'POST'])
-def recibir_pick():
-    if request.method == 'POST':
-        # Soporta tanto JSON de tu otra IA como datos del formulario web
-        datos = request.json or request.form
-    else:
-        datos = request.args
-
-    evento = datos.get('evento')
-    pronostico = datos.get('pronostico')
-    cuota = datos.get('cuota')
-    unidades = datos.get('unidades', '1.0')
-    analisis = datos.get('analisis', 'Análisis en desarrollo...')
-    tipo_grupo = datos.get('tipo_grupo', 'vip') # Por defecto va al VIP si no se especifica
-
-    if not evento or not pronostico or not cuota:
-        return jsonify({"status": "error", "message": "Faltan datos obligatorios"}), 400
-
+@app.route('/webhook-pick', methods=['POST'])
+def recibir_pick_automatico():
+    datos_recibidos = request.json or request.form
     fecha_hoy = datetime.date.today().strftime("%Y-%m-%d")
 
-    # Guardar en base de datos CSV
-    existe_archivo = os.path.exists(REGISTRO_PATH)
-    with open(REGISTRO_PATH, mode='a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if not existe_archivo:
-            writer.writerow(["Fecha", "Evento", "Pronostico", "Cuota", "Unidades", "Grupo"])
-        writer.writerow([fecha_hoy, evento, pronostico, cuota, unidades, tipo_grupo])
+    # MODO MANUAL: Si usas el botón de "No hay picks" en la web
+    if datos_recibidos.get('modo_manual') == 'no_hay_picks' or datos_recibidos.get('status_picks') == 'vacio':
+        mensaje_no_hay = (
+            f"⚠️ *AVISO IMPORTANTE DE APUESTAS - MLB*\n\n"
+            f"📅 *Fecha:* {fecha_hoy}\n\n"
+            f"Nuestro algoritmo y equipo analítico han revisado la pizarra del día de hoy. "
+            f"Debido a condiciones de lanzadores o líneas sin valor estadístico, **HOY NO SE REGISTRARÁN PICKS OFICIALES**.\n\n"
+            f"¡Cuidamos tu banca! Nos vemos mañana con la mejor selección avanzada. 🔒"
+        )
+        despachar_telegram(mensaje_no_hay, "ambos")
+        despachar_whatsapp(mensaje_no_hay, "ambos")
+        return jsonify({"status": "success", "message": "Mensaje de pizarra vacía enviado"}), 200
 
-    # Formatear el mensaje de salida
-    etiqueta = "🔒 VIP PREMIUN" if tipo_grupo == "vip" else "🔓 LÍNEA GRATUITA"
-    if tipo_grupo == "ambos": etiqueta = "⚾ PICK OFICIAL"
+    # Capturar la lista de picks enviados por tu otra app
+    picks_lista = datos_recibidos.get('picks', [])
 
-    mensaje_vip = (
-        f"{etiqueta} *MLB*\n\n"
-        f"📅 *Fecha:* {fecha_hoy}\n"
-        f"🔥 *Partido:* {evento}\n"
-        f"🎯 *Pronóstico:* {pronostico}\n"
-        f"📈 *Cuota:* {cuota}\n"
-        f"💰 *Stake:* {unidades} U\n\n"
-        f"📋 *Análisis:* {analisis}"
-    )
+    # Si tu otra app envía los datos como un solo pick directo (no en lista), lo convertimos en lista
+    if not picks_lista and datos_recibidos.get('evento'):
+        picks_lista = [datos_recibidos]
 
-    # Envíos automáticos según corresponda
-    enviar_telegram(mensaje_vip, tipo_grupo)
-    if tipo_grupo in ['vip', 'ambos']:
-        enviar_whatsapp_gratis(mensaje_vip)
+    cantidad_picks = len(picks_lista)
 
-    return jsonify({"status": "success", "message": f"Pick enviado correctamente a destino: {tipo_grupo}"}), 200
+    # PANORAMA 1: No llegaron picks desde el generador automatizado
+    if cantidad_picks == 0:
+        mensaje_no_hay = (
+            f"⚠️ *MLB INFORME DE PIZARRA*\n\n"
+            f"📅 *Fecha:* {fecha_hoy}\n\n"
+            f"El software de Inteligencia Suite no ha detectado anomalías o ventajas matemáticas claras en los partidos de hoy. "
+            f"Mantenemos disciplina estricta sin forzar jugadas. ¡Regresamos mañana! 🎯"
+        )
+        despachar_telegram(mensaje_no_hay, "ambos")
+        despachar_whatsapp(mensaje_no_hay, "ambos")
+        return jsonify({"status": "success", "message": "Aviso de no-picks publicado en ambos grupos"}), 200
+
+    # PANORAMA 2: Se generó UN SOLO PICK de alta confianza (Se va a ambos grupos)
+    elif cantidad_picks == 1:
+        p = picks_lista[0]
+        mensaje = construir_plantilla_mensaje(
+            "🚀 *PICK OFICIAL GLOBAL*", fecha_hoy, p.get('evento'), 
+            p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), p.get('analisis', 'Análisis en desarrollo...')
+        )
+        guardar_en_registro(fecha_hoy, p.get('evento'), p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), "Ambos")
+        despachar_telegram(mensaje, "ambos")
+        despachar_whatsapp(mensaje, "ambos")
+        return jsonify({"status": "success", "message": "Unico pick despachado de forma masiva"}), 200
+
+    # PANORAMA 3: Se generaron VARIOS PICKS (El 1ero es gancho gratis, los demás van al VIP)
+    else:
+        for indice, p in enumerate(picks_lista):
+            # El primero se define como el gancho Gratuito
+            if indice == 0:
+                destino = "gratis"
+                etiqueta = "🔓 *LÍNEA GRATUITA GANCHO*"
+            else:
+                destino = "vip"
+                etiqueta = "🔒 *EXCLUSIVO VIP PREMIUM*"
+
+            mensaje = construir_plantilla_mensaje(
+                etiqueta, fecha_hoy, p.get('evento'), 
+                p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), p.get('analisis', 'Análisis de valor premium.')
+            )
+            guardar_en_registro(fecha_hoy, p.get('evento'), p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), destino)
+            despachar_telegram(mensaje, destino)
+            despachar_whatsapp(mensaje, destino)
+
+        return jsonify({"status": "success", "message": f"Estrategia de división ejecutada. {cantidad_picks} picks procesados."}), 200
 
 if __name__ == '__main__':
     puerto = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=puerto)
+
 
