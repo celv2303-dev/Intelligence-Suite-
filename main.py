@@ -8,14 +8,14 @@ import requests
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN DIRECTA DE TUS CREDENCIALES REALES
+# CONFIGURACIÓN DIRECTA Y ESTÁTICA FORZADA
 # ==========================================
 TELEGRAM_TOKEN = "8847229993:AAErL9nrx1Ytw9SLm6qLBN_Z1oTZ22kRqLk"
 CHAT_ID_GRATIS = "-1004456471604"
 CHAT_ID_VIP = "-1004427304402"
 
 WHATSAPP_PHONE = "56957655242"
-WHATSAPP_API_KEY = "pendiente"  # Cambia por tu número de CallMeBot si te llega después
+WHATSAPP_API_KEY = "pendiente"
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REGISTRO_PATH = os.path.join(BASE_DIR, "registro.csv")
@@ -78,18 +78,19 @@ PAGINA_INICIO = """
 """
 
 def despachar_telegram(mensaje, destino):
-    if not TELEGRAM_TOKEN or "TU_TOKEN" in TELEGRAM_TOKEN: return
     chats = []
     if destino in ["gratis", "ambos"]: chats.append(CHAT_ID_GRATIS)
     if destino in ["vip", "ambos"]: chats.append(CHAT_ID_VIP)
     for chat_id in chats:
         url = f"https://telegram.org{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
-        try: requests.post(url, json=payload, timeout=10)
-        except: pass
+        try:
+            requests.post(url, json=payload, timeout=10)
+        except Exception as e:
+            print(f"Error forzado enviando a Telegram: {e}")
 
 def despachar_whatsapp(mensaje, destino):
-    if not WHATSAPP_API_KEY or "tu_apikey" in WHATSAPP_API_KEY or "pendiente" in WHATSAPP_API_KEY: return
+    if "pendiente" in WHATSAPP_API_KEY: return
     if destino in ["vip", "ambos"]:
         url = f"https://callmebot.com{WHATSAPP_PHONE}&text={requests.utils.quote(mensaje)}&apikey={WHATSAPP_API_KEY}"
         try: requests.get(url, timeout=10)
@@ -138,7 +139,7 @@ def recibir_pick_automatico():
 
     cantidad_picks = len(picks_lista)
 
-    if cantidad_picks == 0 or (cantidad_picks == 1 and str(picks_lista[0].get('unidades')) == '0'):
+    if cantidad_picks == 0 or (cantidad_picks == 1 and str(picks_lista[0].get('unidades') if es_json else picks_lista[0].get('unidades')) == '0'):
         p_vacio = picks_lista[0] if cantidad_picks == 1 else datos_recibidos
         evento_texto = p_vacio.get('evento', f"Sin Pick Disponible — {fecha_hoy}")
         pronostico_texto = p_vacio.get('pronostico', "Sin pick hoy")
