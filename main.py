@@ -8,14 +8,14 @@ import requests
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN DE REDES SOCIALES (VIP Y GRATIS)
+# CONFIGURACIÓN DIRECTA DE TUS CREDENCIALES REALES
 # ==========================================
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-CHAT_ID_VIP = os.environ.get("TELEGRAM_CHAT_ID_VIP", "")
-CHAT_ID_GRATIS = os.environ.get("TELEGRAM_CHAT_ID_GRATIS", "")
+TELEGRAM_TOKEN = "8847229993:AAErL9nrx1Ytw9SLm6qLBN_Z1oTZ22kRqLk"
+CHAT_ID_GRATIS = "-1004456471604"
+CHAT_ID_VIP = "-1004427304402"
 
-WHATSAPP_PHONE = os.environ.get("WHATSAPP_PHONE", "")
-WHATSAPP_API_KEY = os.environ.get("WHATSAPP_API_KEY", "")
+WHATSAPP_PHONE = "56957655242"
+WHATSAPP_API_KEY = "pendiente"  # Cambia por tu número de CallMeBot si te llega después
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 REGISTRO_PATH = os.path.join(BASE_DIR, "registro.csv")
@@ -89,7 +89,7 @@ def despachar_telegram(mensaje, destino):
         except: pass
 
 def despachar_whatsapp(mensaje, destino):
-    if not WHATSAPP_API_KEY or "TU_API_KEY" in WHATSAPP_API_KEY or "pendiente" in WHATSAPP_API_KEY: return
+    if not WHATSAPP_API_KEY or "tu_apikey" in WHATSAPP_API_KEY or "pendiente" in WHATSAPP_API_KEY: return
     if destino in ["vip", "ambos"]:
         url = f"https://callmebot.com{WHATSAPP_PHONE}&text={requests.utils.quote(mensaje)}&apikey={WHATSAPP_API_KEY}"
         try: requests.get(url, timeout=10)
@@ -121,7 +121,6 @@ def inicio():
 
 @app.route('/webhook-pick', methods=['GET', 'POST'])
 def recibir_pick_automatico():
-    # Soporte híbrido completo: si es una consulta GET visual del formulario o un POST de datos de la otra app
     if request.method == 'GET':
         return redirect(url_for('inicio'))
 
@@ -133,7 +132,6 @@ def recibir_pick_automatico():
 
     fecha_hoy = datetime.date.today().strftime("%Y-%m-%d")
     
-    # Normalizar lecturas de datos
     picks_lista = datos_recibidos.get('picks', []) if es_json else []
     if not picks_lista and datos_recibidos.get('evento'):
         picks_lista = [datos_recibidos]
