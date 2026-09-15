@@ -8,7 +8,7 @@ import requests
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN ESTÁTICA EXPLICITA Y CORREGIDA
+# CONFIGURACIÓN ESTÁTICA INTEGRADA REAL
 # ==========================================
 TELEGRAM_TOKEN = "8847229993:AAErL9nrx1Ytw9SLm6qLBN_Z1oTZ22kRqLk"
 CHAT_ID_GRATIS = "-1004456471604"
@@ -82,7 +82,7 @@ def despachar_telegram(mensaje, destino):
     if destino in ["gratis", "ambos"]: chats.append(CHAT_ID_GRATIS)
     if destino in ["vip", "ambos"]: chats.append(CHAT_ID_VIP)
     for chat_id in chats:
-        url = f"https://telegram.org{TELEGRAM_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
         try:
             requests.post(url, json=payload, timeout=10)
@@ -125,76 +125,43 @@ def recibir_pick_automatico():
     if request.method == 'GET':
         return redirect(url_for('inicio'))
 
-    es_json = request.is_json
-    if es_json:
-        datos_recibidos = request.get_json()
+    # Detectar formato de datos entrante de manera robusta
+    if request.is_json:
+        datos = request.get_json() or {}
     else:
-        datos_recibidos = request.form
+        datos = request.form or {}
 
     fecha_hoy = datetime.date.today().strftime("%Y-%m-%d")
     
-    # Procesar datos unificados del formulario o de listas JSON
-    picks_lista = datos_recibidos.get('picks', []) if es_json else []
-    if not picks_lista and datos_recibidos.get('evento'):
-        # Crear estructura compatible si viene un objeto único
-        picks_lista = [datos_recibidos]
+    # Extraer variables principales independientemente del formato de origen
+    evento = datos.get('evento')
+    pronostico = datos.get('pronostico')
+    cuota = datos.get('cuota')
+    unidades = str(datos.get('unidades', '1.0'))
+    analisis = datos.get('analisis', 'Sin análisis detallado.')
+    tipo_grupo = datos.get('tipo_grupo', 'ambos')
 
-    cantidad_picks = len(picks_lista)
-    unidades_str = str(datos_recibidos.get('unidades'))
+    # Guardar en base de datos e iniciar despachos
+    guardar_en_registro(fecha_hoy, evento, pronostico, cuota, unidades, tipo_grupo)
 
-    if cantidad_picks == 0 or unidades_str == '0':
-        evento_texto = datos_recibidos.get('evento', f"Sin Pick Disponible — {fecha_hoy}")
-        pronostico_texto = datos_recibidos.get('pronostico', "Sin pick hoy")
-        cuota_texto = datos_recibidos.get('cuota', "—")
-        analisis_texto = datos_recibidos.get('analisis', "No hay pick disponible para el día de hoy.")
-        tipo_grupo = datos_recibidos.get('tipo_grupo', 'ambos')
-
+    if unidades == '0' or not evento:
         mensaje_no_hay = construir_plantilla_mensaje(
             "⚠️ *AVISO OPERATIVO DE APUESTAS*", fecha_hoy, 
-            evento_texto, pronostico_texto, cuota_texto, "0", analisis_texto
+            evento, pronostico, cuota, "0", analisis
         )
-        
-        guardar_en_registro(fecha_hoy, evento_texto, pronostico_texto, cuota_texto, "0", tipo_grupo)
         despachar_telegram(mensaje_no_hay, tipo_grupo)
         despachar_whatsapp(mensaje_no_hay, tipo_grupo)
-        
-        if es_json:
-            return jsonify({"status": "success", "message": "Mensaje enviado"}), 200
-        return redirect(url_for('inicio', msg="Aviso de 'Sin Picks' enviado correctamente."))
-
-    elif cantidad_picks == 1:
-        p = picks_lista[0]
-        tipo_grupo = p.get('tipo_grupo', 'ambos')
-        mensaje = construir_plantilla_mensaje(
-            "🚀 *PICK OFICIAL GLOBAL*", fecha_hoy, p.get('evento'), 
-            p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), p.get('analisis', 'Análisis en desarrollo...')
-        )
-        guardar_en_registro(fecha_hoy, p.get('evento'), p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), tipo_grupo)
-        despachar_telegram(mensaje, tipo_grupo)
-        despachar_whatsapp(mensaje, tipo_grupo)
-        
-        if es_json:
-            return jsonify({"status": "success", "message": "Pick enviado"}), 200
-        return redirect(url_for('inicio', msg="Pick publicado con éxito."))
-
     else:
-        for indice, p in enumerate(picks_lista):
-            if indice == 0:
-                destino = "gratis"
-                etiqueta = "🔓 *LÍNEA GRATUITA GANCHO*"
-            else:
-                destino = "vip"
-                etiqueta = "🔒 *EXCLUSIVO VIP PREMIUM*"
+        etiqueta = "🚀 *PICK OFICIAL GLOBAL*" if tipo_grupo == "ambos" else ("🔒 *EXCLUSIVO VIP PREMIUM*" if tipo_grupo == "vip" else "🔓 *LÍNEA GRATUITA GANCHO*")
+        mensaje_pick = construir_plantilla_mensaje(
+            etiqueta, fecha_hoy, evento, pronostico, cuota, unidades, analisis
+        )
+        despachar_telegram(mensaje_pick, tipo_grupo)
+        despachar_whatsapp(mensaje_pick, tipo_grupo)
 
-            mensaje = construir_plantilla_mensaje(
-                etiqueta, fecha_hoy, p.get('evento'), 
-                p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), p.get('analisis', 'Análisis premium.')
-            )
-            guardar_en_registro(fecha_hoy, p.get('evento'), p.get('pronostico'), p.get('cuota'), p.get('unidades', '1.0'), destino)
-            despachar_telegram(mensaje, destino)
-            despachar_whatsapp(mensaje, destino)
-
-        return jsonify({"status": "success", "message": "Múltiples picks divididos correctamente."}), 200
+    if request.is_json:
+        return jsonify({"status": "success", "message": "Procesado correctamente"}), 200
+    return redirect(url_for('inicio', msg="Aviso de 'Sin Picks' enviado correctamente."))
 
 if __name__ == '__main__':
     puerto = int(os.environ.get("PORT", 5000))
