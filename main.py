@@ -8,7 +8,7 @@ import requests
 app = Flask(__name__)
 
 # ==========================================
-# CONFIGURACIÓN DIRECTA Y ESTÁTICA FORZADA
+# CONFIGURACIÓN ESTÁTICA EXPLICITA Y CORREGIDA
 # ==========================================
 TELEGRAM_TOKEN = "8847229993:AAErL9nrx1Ytw9SLm6qLBN_Z1oTZ22kRqLk"
 CHAT_ID_GRATIS = "-1004456471604"
@@ -86,8 +86,8 @@ def despachar_telegram(mensaje, destino):
         payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
         try:
             requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            print(f"Error forzado enviando a Telegram: {e}")
+        except:
+            pass
 
 def despachar_whatsapp(mensaje, destino):
     if "pendiente" in WHATSAPP_API_KEY: return
@@ -133,19 +133,21 @@ def recibir_pick_automatico():
 
     fecha_hoy = datetime.date.today().strftime("%Y-%m-%d")
     
+    # Procesar datos unificados del formulario o de listas JSON
     picks_lista = datos_recibidos.get('picks', []) if es_json else []
     if not picks_lista and datos_recibidos.get('evento'):
+        # Crear estructura compatible si viene un objeto único
         picks_lista = [datos_recibidos]
 
     cantidad_picks = len(picks_lista)
+    unidades_str = str(datos_recibidos.get('unidades'))
 
-    if cantidad_picks == 0 or (cantidad_picks == 1 and str(picks_lista[0].get('unidades') if es_json else picks_lista[0].get('unidades')) == '0'):
-        p_vacio = picks_lista[0] if cantidad_picks == 1 else datos_recibidos
-        evento_texto = p_vacio.get('evento', f"Sin Pick Disponible — {fecha_hoy}")
-        pronostico_texto = p_vacio.get('pronostico', "Sin pick hoy")
-        cuota_texto = p_vacio.get('cuota', "—")
-        analisis_texto = p_vacio.get('analisis', "No hay pick disponible para el día de hoy.")
-        tipo_grupo = p_vacio.get('tipo_grupo', 'ambos')
+    if cantidad_picks == 0 or unidades_str == '0':
+        evento_texto = datos_recibidos.get('evento', f"Sin Pick Disponible — {fecha_hoy}")
+        pronostico_texto = datos_recibidos.get('pronostico', "Sin pick hoy")
+        cuota_texto = datos_recibidos.get('cuota', "—")
+        analisis_texto = datos_recibidos.get('analisis', "No hay pick disponible para el día de hoy.")
+        tipo_grupo = datos_recibidos.get('tipo_grupo', 'ambos')
 
         mensaje_no_hay = construir_plantilla_mensaje(
             "⚠️ *AVISO OPERATIVO DE APUESTAS*", fecha_hoy, 
