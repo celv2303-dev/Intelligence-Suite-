@@ -219,10 +219,10 @@ def construir_plantilla_mensaje(etiqueta, fecha, evento, pronostico, cuota, unid
         f"{etiqueta}\n\n"
         f"\U0001F4C5 <b>Fecha:</b> {esc(fecha)}\n"
         f"\U0001F525 <b>Evento:</b> {esc(evento)}\n"
-        f"\U0001F3AF <b>Pronostico:</b> {esc(pronostico)}\n"
+        f"\U0001F3AF <b>Pronóstico:</b> {esc(pronostico)}\n"
         f"\U0001F4C8 <b>Cuota:</b> {esc(cuota)}\n"
         f"\U0001F4B0 <b>Stake Sugerido:</b> {esc(unidades)} U\n\n"
-        f"\U0001F4CB <b>Analisis Tecnico:</b>\n{esc(analisis)}"
+        f"\U0001F4CB <b>Análisis Técnico:</b>\n{esc(analisis)}"
     )
 
 
@@ -442,7 +442,7 @@ def recibir_pick():
         etiqueta = {
             "ambos": "\U0001F680 <b>PICK OFICIAL GLOBAL</b>",
             "vip": "\U0001F512 <b>EXCLUSIVO VIP PREMIUM</b>",
-            "gratis": "\U0001F513 <b>LINEA GRATUITA GANCHO</b>",
+            "gratis": "\U0001F513 <b>FREE PICK ACTIVO</b>",
         }[tipo_grupo]
         unidades_msg = unidades
 
