@@ -1114,7 +1114,7 @@ def promo_vip(menu, precio_valores, precio_dia):
         + "\n".join(lineas)
         + f"\n\n\U0001F4E6 <b>{_cuenta(total, 'parada', 'paradas')} en total</b>\n\n"
         + (f"\U0001F48E\U0001F4B0 <b>Solo los {n_valores} ESPECIALES DE ALTO DIVIDENDO: {esc(precio_valores)}</b>\n"
-           "      (pagan mucho a ganador y a place)\n" if n_valores > 1 else
+           "      (alto dividendo · parada larga)\n" if n_valores > 1 else
            (f"\U0001F48E\U0001F4B0 <b>Solo el ESPECIAL DE ALTO DIVIDENDO: {esc(precio_valores)}</b>\n" if n_valores else ""))
         + f"\U0001F381 <b>TODO EL DÍA POR SOLO {esc(precio_dia)}</b>" + (f" ({incluye})" if incluye else "")
         + "\n\n\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
@@ -1147,8 +1147,8 @@ def venta_valores(menu, precio_valores):
         "<b>ESPECIALES DE ALTO DIVIDENDO</b>\n"
         "\U0001F48E\U0001F4B0\U0001F48E\U0001F4B0\U0001F48E\n\n"
         f"Hoy tenemos <b>{_cuenta(n, 'ejemplar especial', 'ejemplares especiales')}</b> que "
-        "<b>PAGAN MUCHO a GANADOR y a PLACE</b> \U0001F4B5\U0001F4B5\n"
-        "\U0001F3AF Para <b>JUGAR LARGO</b>: a 5 puesto o a ganar\n"
+        "de <b>ALTO DIVIDENDO</b> \U0001F4B5\U0001F4B5\n"
+        "\U0001F3AF <b>PARADA LARGA</b>\n"
         + rango + "\n"
         + "\n\n".join(bloques)
         + f"\n\n\U0001F381 <b>{'LOS ' + str(n) if n > 1 else 'EL ESPECIAL'} POR SOLO {esc(precio_valores)}</b> (una sola promoción)\n"
@@ -1183,8 +1183,8 @@ def ultimo_llamado_valores(menu, precio_valores, minutos):
         f"⏳⏳ <b>ÚLTIMO LLAMADO</b> ⏳⏳\n\n"
         f"En <b>{minutos} minutos</b> corre el primer <b>ESPECIAL DE ALTO DIVIDENDO</b> de hoy "
         f"({esc(vals[0][0]['nombre'])}, C{esc(vals[0][1]['carrera'])}).\n\n"
-        f"\U0001F48E\U0001F4B0 <b>{_cuenta(len(vals), 'ejemplar que paga mucho', 'ejemplares que pagan mucho')} "
-        f"a ganador y place por {esc(precio_valores)}</b>\n"
+        f"\U0001F48E\U0001F4B0 <b>{_cuenta(len(vals), 'ejemplar', 'ejemplares')} de ALTO DIVIDENDO · PARADA LARGA "
+        f"por {esc(precio_valores)}</b>\n"
         f"\U0001F381 O todo el día en el VIP por <b>{esc(PRECIO_DIA)}</b>\n\n"
         + _bloque_pago()
     )
