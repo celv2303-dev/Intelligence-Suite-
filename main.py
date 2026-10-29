@@ -298,6 +298,30 @@ PAGINA_INICIO = """
 
         <datalist id="lista-etiquetas">{% for e in etiquetas %}<option value="{{ e.nombre }}">{% endfor %}</datalist>
 
+        <!-- 0. MENU PEGADO -->
+        <details {% if vista %}open{% endif %}>
+            <summary>&#128203; 0. Pegar menú del día (todo automático)</summary>
+            <form method="POST">
+                <label>Pega aquí el menú de etiquetas tal cual:</label>
+                <textarea name="menu" rows="10" placeholder="🏷 Etiquetas · miércoles 28 de octubre&#10;🏇 Belmont Park&#10;* ★ BEST BET: HOY NO HAY&#10;* 💰 VALOR DEL DÍA: ⏰ 3:14 PM · C5 · #12 Duty (6/1)&#10;...">{{ menu_texto }}</textarea>
+                <label>Nota de horarios:</label>
+                <textarea name="nota" rows="3">{{ menu_nota }}</textarea>
+                <button type="submit" formaction="/menu-vista" class="b-azul">&#128065; Vista previa</button>
+                {% if vista %}
+                <div style="margin-top:16px">
+                    <label class="check"><input type="checkbox" name="pub_menu" value="1" checked>&#128275; Menú público al grupo gratis (sin nombres ni números)</label>
+                    <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.publico }}</pre>
+                    <label>&#128274; Picks completos al VIP (marca los que quieres enviar ahora):</label>
+                    {% for p in vista.picks %}
+                    <label class="check"><input type="checkbox" name="pick" value="{{ loop.index0 }}" checked>{{ p }}</label>
+                    {% endfor %}
+                    {% if not vista.picks %}<div class="ayuda">No se encontró ningún pick en el menú.</div>{% endif %}
+                    <button type="submit" formaction="/webhook-menu">&#128640; Publicar lo marcado</button>
+                </div>
+                {% endif %}
+            </form>
+        </details>
+
         <!-- 1. PROGRAMACION -->
         <details>
             <summary>&#9728;&#65039; 1. Programación del día (mañana)</summary>
@@ -729,8 +753,10 @@ def pago_desde_ml(ml, base=2):
 
 
 def mensaje_pick(etiqueta, hipodromo, carrera, numero, caballo, tipo_apuesta,
-                 cuota, unidades, analisis, pago=""):
+                 cuota, unidades, analisis, pago="", hora=""):
     info = info_etiqueta(etiqueta)
+    linea_hipodromo = (f"\U0001F3C7 <u>Hípica - {esc(hipodromo)} · Carrera {esc(carrera)}</u>"
+                       + (f"\n\u23F0 {esc(hora)}" if hora else ""))
     jugada = " ".join(p for p in (
         f"#{numero.lstrip('#')}" if numero else "",
         caballo,
@@ -744,7 +770,7 @@ def mensaje_pick(etiqueta, hipodromo, carrera, numero, caballo, tipo_apuesta,
         partes = [
             f"{info['emoji']} <b>{esc(etiqueta)}</b>",
             "",
-            f"\U0001F3C7 <u>Hípica - {esc(hipodromo)} · Carrera {esc(carrera)}</u>",
+            linea_hipodromo,
             "",
             f"\U0001F400 <b>{esc(ejemplar or tipo_apuesta)}</b>",
             "\u26A0\uFE0F Favorito vulnerable: <b>NO nos gusta para ganar</b>",
@@ -755,11 +781,11 @@ def mensaje_pick(etiqueta, hipodromo, carrera, numero, caballo, tipo_apuesta,
         partes = [
             f"{info['emoji']} <b>{esc(etiqueta)}</b>",
             "",
-            f"\U0001F3C7 <u>Hípica - {esc(hipodromo)} · Carrera {esc(carrera)}</u>",
+            linea_hipodromo,
             "",
             f"\U0001F449 <b>{esc(jugada)}</b>",
             "",
-            f"\U0001F4C8 <i>Cuota {esc(cuota)}</i>   \U0001F4CD <i>STAKE {esc(unidades)}</i>",
+            f"\U0001F4C8 <i>Cuota {esc(cuota)}</i>" + (f"   \U0001F4CD <i>STAKE {esc(unidades)}</i>" if unidades else ""),
         ]
     if analisis:
         partes += ["", f"\U0001F4CB {esc(analisis)}"]
@@ -767,6 +793,133 @@ def mensaje_pick(etiqueta, hipodromo, carrera, numero, caballo, tipo_apuesta,
     texto += linea_bono()
     texto += "\n\n\U0001F51E Juega con responsabilidad."
     return texto
+
+
+# ==========================================
+# MENU DEL DIA PEGADO (formato de tu sistema de etiquetas)
+# ==========================================
+import re as _re
+import unicodedata as _ud
+
+_RE_ENTRADA = _re.compile(
+    r"\u23F0\s*([0-9]{1,2}:[0-9]{2}\s*[AaPp]\.?\s*[Mm]\.?)\s*[·\-|]\s*C\s*(\d+)\s*[·\-|]\s*#\s*(\d+)\s+(.+?)\s*\(([^)]+)\)")
+_DIAS_TXT = {"lunes": "LUNES", "martes": "MARTES", "miercoles": "MIÉRCOLES", "jueves": "JUEVES",
+             "viernes": "VIERNES", "sabado": "SÁBADO", "domingo": "DOMINGO"}
+
+
+def _sin_acentos(t):
+    return "".join(c for c in _ud.normalize("NFD", t) if _ud.category(c) != "Mn").upper()
+
+
+def _limpiar_linea(l):
+    return _re.sub(r"^[\s*\-•·]+", "", l).strip()
+
+
+def parsear_menu(texto):
+    """Lee el menu de etiquetas (🏇 hipodromo, BEST BET, VALOR DEL DIA, RATA DEL DIA, RATAS FUERTES)."""
+    dia = None
+    hipodromos = []
+    actual = None
+    etiqueta = None
+    ultimo = None
+    for cruda in (texto or "").splitlines():
+        linea = _limpiar_linea(cruda)
+        if not linea:
+            continue
+        plano = _sin_acentos(linea)
+        if dia is None and "ETIQUETAS" in plano:
+            for k, v in _DIAS_TXT.items():
+                if k.upper() in plano:
+                    dia = v
+            continue
+        if linea.startswith("\U0001F3C7"):
+            actual = {"nombre": linea.lstrip("\U0001F3C7").strip(), "items": []}
+            hipodromos.append(actual)
+            etiqueta, ultimo = None, None
+            continue
+        if actual is None:
+            continue
+        if "PARA EL GRUPO VIP" in plano or "ESTA LISTA" in plano:
+            continue
+        nueva = None
+        if "BEST BET" in plano:
+            nueva = "BEST BET"
+        elif "VALOR DEL DIA" in plano:
+            nueva = "VALOR"
+        elif "RATA" in plano and "FUERTE" in plano:
+            nueva = "RATA FUERTE"
+        elif "RATA DEL DIA" in plano or "RATAS DEL DIA" in plano:
+            nueva = "RATA DEL DÍA"
+        if nueva:
+            etiqueta, ultimo = nueva, None
+        m = _RE_ENTRADA.search(linea)
+        if m and etiqueta:
+            ultimo = {"etiqueta": etiqueta, "hora": m.group(1).upper().replace(".", ""),
+                      "carrera": m.group(2), "numero": m.group(3), "caballo": m.group(4).strip(),
+                      "ml": m.group(5).strip(), "resena": ""}
+            actual["items"].append(ultimo)
+        elif not nueva and not m and ultimo is not None and ultimo["etiqueta"] == "VALOR" and "HOY NO HAY" not in plano:
+            ultimo["resena"] = (ultimo["resena"] + " " + linea).strip()
+    # Si un ejemplar es RATA DEL DIA y RATA FUERTE a la vez, queda solo como RATA FUERTE
+    for h in hipodromos:
+        fuertes = {(i["carrera"], i["numero"]) for i in h["items"] if i["etiqueta"] == "RATA FUERTE"}
+        h["items"] = [i for i in h["items"]
+                      if not (i["etiqueta"] == "RATA DEL DÍA" and (i["carrera"], i["numero"]) in fuertes)]
+    return {"dia": dia, "hipodromos": [h for h in hipodromos if h["items"]]}
+
+
+def _orden_hora(item):
+    try:
+        return datetime.datetime.strptime(item["hora"].replace(" ", ""), "%I:%M%p").time()
+    except ValueError:
+        return datetime.time(23, 59)
+
+
+def menu_publico(menu, nota, fecha, valor):
+    """Menu para el grupo gratis: etiquetas y horas SIN nombre ni numero del ejemplar."""
+    dia = menu["dia"] or DIAS[fecha.weekday()]
+    nombres = {"BEST BET": "\u2B50 BEST BET", "VALOR": f"\U0001F31F ESPECIAL ({valor})",
+               "RATA DEL DÍA": "\U0001F400 RATA DEL DÍA", "RATA FUERTE": "\U0001F400\U0001F525 RATA FUERTE"}
+    bloques = []
+    for h in menu["hipodromos"]:
+        filas = [f"\U0001F3C7 <u><b>{esc(h['nombre'].upper())}</b></u>"]
+        for i in sorted(h["items"], key=_orden_hora):
+            filas.append(f"\u2611\uFE0F <b>{esc(nombres[i['etiqueta']])}</b> | {esc(i['hora'])} · C{esc(i['carrera'])}")
+            if i["etiqueta"] == "VALOR" and i["resena"]:
+                filas.append(f"      \U0001F4DD <i>{esc(i['resena'])}</i>")
+        bloques.append("\n".join(filas))
+    texto = f"\U0001F5D3 <u><b>PROGRAMACIÓN DEL {dia}:</b></u>\n\n" + "\n\n".join(bloques)
+    if (nota or "").strip():
+        texto += f"\n\n{esc(nota.strip())}"
+    if DESCRIPCION_CANAL:
+        texto += f"\n\n\U0001F916 <i>{esc(DESCRIPCION_CANAL)}</i>"
+    return texto
+
+
+def picks_vip(menu):
+    """Lista de (titulo, etiqueta, texto) con cada pick completo para el VIP."""
+    salida = []
+    for h in menu["hipodromos"]:
+        for i in sorted(h["items"], key=_orden_hora):
+            if i["etiqueta"] == "VALOR":
+                etq = "ESPECIAL"
+                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "Ganador",
+                                     i["ml"], "", i["resena"], hora=i["hora"])
+            elif i["etiqueta"] == "BEST BET":
+                etq = f"BEST BET {h['nombre'].upper()}"
+                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "Ganador",
+                                     i["ml"], "", "", hora=i["hora"])
+            else:
+                etq = "RATAS DEL DÍA" if i["etiqueta"] == "RATA DEL DÍA" else "RATA FUERTE"
+                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "",
+                                     i["ml"], "", "", hora=i["hora"])
+            titulo = f"{etq} · {h['nombre']} C{i['carrera']} · #{i['numero']} {i['caballo']} ({i['ml']}) · {i['hora']}"
+            salida.append((titulo, etq, texto))
+    return salida
+
+
+def html_a_texto(t):
+    return html.unescape(_re.sub(r"<[^>]+>", "", t))
 
 
 def mensaje_verde(etiqueta, texto, detalle_caballo, pago=""):
@@ -968,7 +1121,7 @@ def resumir(resultados):
 # ==========================================
 # RESPUESTAS COMUNES
 # ==========================================
-def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200):
+def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200, **extra):
     return render_template_string(
         PAGINA_INICIO,
         entregado_todo=entregado_todo,
@@ -986,6 +1139,9 @@ def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200):
         nota_horarios=NOTA_HORARIOS,
         hay_banner=bool(IMG_MENU_DEL_DIA),
         hay_gif=bool(GIF_NUEVO_PRONOSTICO or GIF_GRATIS),
+        vista=extra.get("vista"),
+        menu_texto=extra.get("menu_texto", ""),
+        menu_nota=extra.get("menu_nota", NOTA_HORARIOS),
     ), status
 
 
@@ -1085,6 +1241,71 @@ def health():
         "banner_menu": bool(IMG_MENU_DEL_DIA),
         "gif_pronostico": bool(GIF_NUEVO_PRONOSTICO or GIF_GRATIS),
     }), 200
+
+
+@app.route("/menu-vista", methods=["POST"])
+def vista_menu():
+    if not auth_ok():
+        return respuesta_no_autorizado()
+    texto = request.form.get("menu", "")
+    nota = request.form.get("nota", NOTA_HORARIOS)
+    menu = parsear_menu(texto)
+    if not menu["hipodromos"]:
+        return render_panel(detalle="No se encontró ningún hipódromo (🏇) con picks en el menú pegado.",
+                            menu_texto=texto, menu_nota=nota, status=422)
+    vista = {
+        "publico": html_a_texto(menu_publico(menu, nota, ahora_local(), VALOR_ESPECIAL)),
+        "picks": [t for t, _, _ in picks_vip(menu)],
+    }
+    return render_panel(vista=vista, menu_texto=texto, menu_nota=nota)
+
+
+@app.route("/webhook-menu", methods=["POST"])
+def publicar_menu():
+    """Publica el menu publico (gratis) y los picks marcados (VIP). JSON: {"menu": "...", "picks": "todos"}."""
+    error = chequeo_previo()
+    if error:
+        return error
+    quiere_json, datos = leer_datos()
+    texto = campo(datos, "menu")
+    nota = datos.get("nota", NOTA_HORARIOS) if quiere_json else request.form.get("nota", NOTA_HORARIOS)
+    menu = parsear_menu(texto)
+    if not menu["hipodromos"]:
+        return responder_error(quiere_json, ["no se encontró ningún hipódromo con picks en el menú"])
+    validar = []
+    validar_fuga(validar, texto)
+    if validar:
+        return responder_error(quiere_json, validar)
+
+    picks = picks_vip(menu)
+    if quiere_json:
+        pub_menu = bool(datos.get("pub_menu", True))
+        sel = datos.get("picks", "todos")
+        elegidos = range(len(picks)) if sel == "todos" else [int(x) for x in (sel or [])]
+    else:
+        pub_menu = marcado(datos, "pub_menu")
+        elegidos = [int(x) for x in request.form.getlist("pick") if x.isdigit()]
+
+    resultados = []
+    if pub_menu:
+        publico = menu_publico(menu, nota, ahora_local(), VALOR_ESPECIAL)
+        opciones = {"reply_markup": teclado_contacto(con_comprobante=False)}
+        for r in despachar_telegram("gratis", {"gratis": publico}, gratis=opciones):
+            r["grupo"] = "menu gratis"
+            resultados.append(r)
+    fecha = ahora_local().strftime("%Y-%m-%d %H:%M")
+    for idx in elegidos:
+        if not 0 <= idx < len(picks):
+            continue
+        titulo, etq, texto_pick = picks[idx]
+        imagen = imagen_etiqueta(etq)
+        for r in despachar_telegram("vip", {"vip": texto_pick}, vip={"foto": imagen} if imagen else {}):
+            r["grupo"] = f"VIP {etq}"
+            resultados.append(r)
+            guardar_en_registro(fecha, titulo, etq, "", "", "vip", [r])
+    if not resultados:
+        return responder_error(quiere_json, ["no marcaste nada para publicar"])
+    return responder_envio(quiere_json, resultados, {"picks_enviados": len([i for i in elegidos if 0 <= i < len(picks)])})
 
 
 @app.route("/webhook-programacion", methods=["POST"])
