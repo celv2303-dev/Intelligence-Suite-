@@ -151,6 +151,7 @@ PLANTILLAS_VENTA = {
         "nombre": "🌟 ESPECIAL del día (con QR)",
         "texto": (
             "🌟<b>ESPECIAL{linea_valor}</b>🌟\n\n"
+            "{linea_resena}"
             "👉<b>LA PARADA FUERTE DE LA JORNADA!</b>🔥\n"
             "👉<b>SOLO PARA LOS QUE ENTREN HOY!</b>💰\n"
             "👉<b>PLAZAS MUY LIMITADAS!</b>🎟\n\n"
@@ -303,6 +304,9 @@ PAGINA_INICIO = """
             <form action="/webhook-programacion" method="POST">
                 <label>Valor del día del ESPECIAL:</label>
                 <input type="text" name="valor" value="{{ valor_especial }}" placeholder="Ej: $4.99">
+                <label>Reseña del ejemplar del ESPECIAL (sale debajo del ESPECIAL):</label>
+                <textarea name="resena" rows="3" placeholder="Ej: Baja de categoría, viene de llegar segundo a medio cuerpo y repite jinete. Ojo con su velocidad temprana."></textarea>
+                <div class="ayuda">No pongas el nombre ni el número: el ejemplar es lo que se cobra.</div>
                 <label>Etiquetas y horas (una por línea: ETIQUETA | HORA). Borra las que no haya hoy:</label>
                 <textarea name="lineas" rows="8">{{ programacion_defecto }}</textarea>
                 <label>Nota de horarios:</label>
@@ -439,6 +443,8 @@ PAGINA_INICIO = """
                 <label class="check"><input type="checkbox" name="con_qr" value="1" checked>Adjuntar el QR de pago (USDT BEP20)</label>
                 <label>Texto libre (solo para "Texto libre"):</label>
                 <textarea name="texto_libre" rows="3"></textarea>
+                <label>Reseña del ESPECIAL (solo para "ESPECIAL del día"):</label>
+                <textarea name="resena" rows="3" placeholder="La misma reseña del menú"></textarea>
                 <label>Destino:</label>
                 <select name="tipo_grupo">
                     <option value="gratis">&#128275; Grupo Gratis</option>
@@ -663,7 +669,7 @@ def contacto_visible(contacto):
 # ==========================================
 # FORMATOS DE MENSAJE (modelo TIPSELVERDE)
 # ==========================================
-def mensaje_programacion(lineas, nota, fecha, valor=""):
+def mensaje_programacion(lineas, nota, fecha, valor="", resena=""):
     dia = DIAS[fecha.weekday()]
     filas = []
     for l in (lineas or "").splitlines():
@@ -673,7 +679,17 @@ def mensaje_programacion(lineas, nota, fecha, valor=""):
         if "{valor}" in l:
             l = l.replace("{valor}", valor) if valor else l.replace(" ({valor})", "").replace("{valor}", "")
         filas.append(l)
-    cuerpo = "\n".join(f"☑️ <b>{esc(f)}</b>" for f in filas)
+    renglones = []
+    resena = (resena or "").strip()
+    puesta = False
+    for f in filas:
+        renglones.append(f"☑️ <b>{esc(f)}</b>")
+        if resena and not puesta and "ESPECIAL" in f.upper():
+            renglones.append(f"      \U0001F4DD <i>{esc(resena)}</i>")
+            puesta = True
+    if resena and not puesta:  # el menu no tenia linea de ESPECIAL
+        renglones.append(f"\n\U0001F31F <b>ESPECIAL</b>\n\U0001F4DD <i>{esc(resena)}</i>")
+    cuerpo = "\n".join(renglones)
     texto = f"\U0001F5D3 <u><b>PROGRAMACIÓN DEL {dia}:</b></u>\n\n{cuerpo}"
     if (nota or "").strip():
         texto += f"\n\n{esc(nota.strip())}"
@@ -771,7 +787,7 @@ def mensaje_verde(etiqueta, texto, detalle_caballo, pago=""):
     return salida + f"<i>{esc(texto)}</i>"
 
 
-def mensaje_venta(clave, oferta, monto, contacto, texto_libre):
+def mensaje_venta(clave, oferta, monto, contacto, texto_libre, resena=""):
     """Devuelve (texto, url_del_boton). El pago es por QR de Binance; el contacto recibe el comprobante."""
     contacto = contacto or VIP_LINK
     if clave == "especial" and not monto:
@@ -795,6 +811,7 @@ def mensaje_venta(clave, oferta, monto, contacto, texto_libre):
         canal=esc(CANAL_NOMBRE),
         oferta=esc(oferta),
         texto_libre=esc(texto_libre),
+        linea_resena=(f"\U0001F4DD <i>{esc(resena)}</i>\n\n" if resena else ""),
     ), url
 
 
@@ -1082,11 +1099,12 @@ def recibir_programacion():
 
     errores = []
     validar_destino(tipo_grupo, errores)
-    validar_fuga(errores, lineas, nota)
+    validar_fuga(errores, lineas, nota, campo(datos, "resena"))
     if errores:
         return responder_error(quiere_json, errores)
 
-    texto = mensaje_programacion(lineas, nota, ahora_local(), campo(datos, "valor") or VALOR_ESPECIAL)
+    texto = mensaje_programacion(lineas, nota, ahora_local(), campo(datos, "valor") or VALOR_ESPECIAL,
+                                 campo(datos, "resena"))
     if marcado(datos, "con_banner") and IMG_MENU_DEL_DIA:
         # el banner va primero como mensaje aparte (igual que el canal modelo)
         for grupo, chat in (("gratis", CHAT_ID_GRATIS), ("vip", CHAT_ID_VIP)):
@@ -1235,6 +1253,7 @@ def recibir_venta():
     monto = campo(datos, "monto")
     link = campo(datos, "contacto") or campo(datos, "link")
     texto_libre = campo(datos, "texto_libre")
+    resena = campo(datos, "resena")
 
     errores = []
     validar_destino(tipo_grupo, errores)
@@ -1244,11 +1263,11 @@ def recibir_venta():
         errores.append("este mensaje necesita la 'oferta' (ej: ESPECIAL ($10))")
     elif clave == "libre" and not texto_libre:
         errores.append("escribe el texto libre")
-    validar_fuga(errores, oferta, monto, texto_libre)
+    validar_fuga(errores, oferta, monto, texto_libre, resena)
     if errores:
         return responder_error(quiere_json, errores)
 
-    texto, url = mensaje_venta(clave, oferta, monto, link, texto_libre)
+    texto, url = mensaje_venta(clave, oferta, monto, link, texto_libre, resena)
     if url and url != url_publica(VIP_LINK):
         teclado = boton("\U0001F4E9 Enviar comprobante", url)
         info = url_publica(CONTACTO_INFO)
