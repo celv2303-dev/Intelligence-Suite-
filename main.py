@@ -2048,7 +2048,17 @@ def manejar_mensaje_privado(msg):
         _dm(uid, texto_bienvenida(), foto=foto, foto_url=foto_url)
         return
     if _es_admin(uid):
-        return  # lo que escribe el admin no se trata como comprobante
+        if texto.startswith("/probar"):
+            # simulacro: el admin hace de cliente para probar todo el flujo
+            llamar_telegram("sendMessage", {
+                "chat_id": ADMIN_CHAT_ID, "parse_mode": "HTML",
+                "text": f"\U0001F9EA <b>PRUEBA</b> · \U0001F4E9 Comprobante de {esc(nombre)} (tú mismo)\nID: <code>{uid}</code>\n\n"
+                        "Así te llegarán los comprobantes. Toca un botón para probar:",
+                "reply_markup": _botones_aprobar(uid)})
+        else:
+            _dm(uid, "\U0001F451 Eres el administrador. Escribe <b>/probar</b> para simular el comprobante de un "
+                     "cliente y probar los botones.")
+        return
     if not ADMIN_CHAT_ID:
         _dm(uid, "Recibido. En breve te atendemos.")
         print("[cobros] llego un comprobante pero falta ADMIN_CHAT_ID", flush=True)
@@ -2201,6 +2211,10 @@ def procesar_accesos():
     cambio = False
     for a in lista:
         if a["plan"] != "vip" or a.get("expulsado"):
+            continue
+        if _es_admin(a["uid"]):
+            a["expulsado"] = True  # prueba del admin: no se le avisa ni se le saca
+            cambio = True
             continue
         vence = datetime.datetime.fromisoformat(a["vence"])
         aviso = datetime.datetime.combine(a_local(vence).date() - datetime.timedelta(days=1),
