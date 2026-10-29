@@ -139,7 +139,8 @@ PROGRAMACION_DEFECTO = (
     "BEST BET DEL DÍA | 20:00h"
 )
 
-TIPOS_APUESTA = ["Ganador", "Place", "Show", "Exacta", "Trifecta", "Superfecta", "Pick 3", "Pick 4", "Daily Double"]
+TIPOS_APUESTA = ["1 puesto", "2 puesto", "3 puesto", "4 puesto", "5 puesto", "2 nini", "5 nini",
+                 "Ganador", "Exacta", "Trifecta", "Superfecta"]
 
 DIAS = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMINGO"]
 
@@ -303,7 +304,7 @@ PAGINA_INICIO = """
             <summary>&#128203; 0. Pegar menú del día (todo automático)</summary>
             <form method="POST">
                 <label>Pega aquí el menú de etiquetas tal cual:</label>
-                <textarea name="menu" rows="10" placeholder="🏷 Etiquetas · miércoles 28 de octubre&#10;🏇 Belmont Park&#10;* ★ BEST BET: HOY NO HAY&#10;* 💰 VALOR DEL DÍA: ⏰ 3:14 PM · C5 · #12 Duty (6/1)&#10;...">{{ menu_texto }}</textarea>
+                <textarea name="menu" rows="10" placeholder="🏷 Etiquetas · miércoles 28 de octubre&#10;🏇 Belmont Park&#10;* ★ BEST BET: HOY NO HAY&#10;* 💰 VALOR DEL DÍA: ⏰ 3:14 PM · C5 · #12 Duty (6/1) · 4 puesto&#10;* 🟥 RATA DEL DÍA: ⏰ 3:14 PM · C5 · #1 Mortal Lock (5/1) · dar 2 puesto&#10;...">{{ menu_texto }}</textarea>
                 <label>Nota de horarios:</label>
                 <textarea name="nota" rows="3">{{ menu_nota }}</textarea>
                 <button type="submit" formaction="/menu-vista" class="b-azul">&#128065; Vista previa</button>
@@ -415,9 +416,9 @@ PAGINA_INICIO = """
                 </div>
                 <div class="fila">
                     <div><label>ML (dividendo):</label><input type="text" name="cuota" placeholder="Ej: 4-5" required></div>
-                    <div><label>Pago x $2 (vacío = automático):</label><input type="text" name="pago" placeholder="Ej: $3.60"></div>
+                    <div><label>Dar (ej: dar 2 puesto). Vacío = pago x $2:</label><input type="text" name="pago" placeholder="Ej: dar 2 puesto"></div>
                 </div>
-                <div class="ayuda">El pago por $2 se calcula solo desde el ML (4-5 &rarr; $3.60). Sale con la imagen de la rata.</div>
+                <div class="ayuda">Escribe lo que hay que dar (ej: dar 2 puesto). Si lo dejas vacío, sale el pago x $2 calculado desde el ML. Sale con la imagen de la rata.</div>
                 <button type="submit" style="background:#b91c1c">&#128000; Publicar rata</button>
             </form>
         </details>
@@ -723,11 +724,18 @@ def mensaje_programacion(lineas, nota, fecha, valor="", resena=""):
 
 
 def linea_ml_rata(ml, pago=""):
-    """Linea corta: 'ML 4-5 · paga $3.60 x $2'."""
-    pago = (pago or "").strip() or pago_desde_ml(ml) or ""
+    """Linea corta: 'ML 4-5 · dar 2 puesto' o, si no hay indicacion, 'ML 4-5 · paga $3.60 x $2'."""
+    pago = (pago or "").strip()
     texto = f"ML {esc(ml)}" if ml else ""
-    if pago:
-        texto += (" · " if texto else "") + f"paga {esc(pago)} x $2"
+    if pago and not pago.startswith("$") and not pago.replace(".", "").isdigit():
+        extra = esc(pago)  # indicacion libre: "dar 2 puesto", "dar 1 puesto"...
+    else:
+        monto = pago or pago_desde_ml(ml) or ""
+        if monto and not monto.startswith("$"):
+            monto = "$" + monto
+        extra = f"paga {esc(monto)} x $2" if monto else ""
+    if extra:
+        texto += (" · " if texto else "") + extra
     return f"<i>{texto}</i>" if texto else ""
 
 
@@ -802,7 +810,7 @@ import re as _re
 import unicodedata as _ud
 
 _RE_ENTRADA = _re.compile(
-    r"\u23F0\s*([0-9]{1,2}:[0-9]{2}\s*[AaPp]\.?\s*[Mm]\.?)\s*[·\-|]\s*C\s*(\d+)\s*[·\-|]\s*#\s*(\d+)\s+(.+?)\s*\(([^)]+)\)")
+    r"\u23F0\s*([0-9]{1,2}:[0-9]{2}\s*[AaPp]\.?\s*[Mm]\.?)\s*[·\-|]\s*C\s*(\d+)\s*[·\-|]\s*#\s*(\d+)\s+(.+?)\s*\(([^)]+)\)\s*[·\-|:,]?\s*(.*)$")
 _DIAS_TXT = {"lunes": "LUNES", "martes": "MARTES", "miercoles": "MIÉRCOLES", "jueves": "JUEVES",
              "viernes": "VIERNES", "sabado": "SÁBADO", "domingo": "DOMINGO"}
 
@@ -856,7 +864,7 @@ def parsear_menu(texto):
         if m and etiqueta:
             ultimo = {"etiqueta": etiqueta, "hora": m.group(1).upper().replace(".", ""),
                       "carrera": m.group(2), "numero": m.group(3), "caballo": m.group(4).strip(),
-                      "ml": m.group(5).strip(), "resena": ""}
+                      "ml": m.group(5).strip(), "tipo": m.group(6).strip(" ·-|:,"), "resena": ""}
             actual["items"].append(ultimo)
         elif not nueva and not m and ultimo is not None and ultimo["etiqueta"] == "VALOR" and "HOY NO HAY" not in plano:
             ultimo["resena"] = (ultimo["resena"] + " " + linea).strip()
@@ -903,17 +911,18 @@ def picks_vip(menu):
         for i in sorted(h["items"], key=_orden_hora):
             if i["etiqueta"] == "VALOR":
                 etq = "ESPECIAL"
-                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "Ganador",
+                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], i["tipo"],
                                      i["ml"], "", i["resena"], hora=i["hora"])
             elif i["etiqueta"] == "BEST BET":
                 etq = f"BEST BET {h['nombre'].upper()}"
-                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "Ganador",
+                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], i["tipo"],
                                      i["ml"], "", "", hora=i["hora"])
             else:
                 etq = "RATAS DEL DÍA" if i["etiqueta"] == "RATA DEL DÍA" else "RATA FUERTE"
                 texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "",
-                                     i["ml"], "", "", hora=i["hora"])
-            titulo = f"{etq} · {h['nombre']} C{i['carrera']} · #{i['numero']} {i['caballo']} ({i['ml']}) · {i['hora']}"
+                                     i["ml"], "", "", pago=i["tipo"], hora=i["hora"])
+            titulo = (f"{etq} · {h['nombre']} C{i['carrera']} · #{i['numero']} {i['caballo']} ({i['ml']})"
+                      + (f" · {i['tipo']}" if i["tipo"] else "") + f" · {i['hora']}")
             salida.append((titulo, etq, texto))
     return salida
 
