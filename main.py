@@ -84,6 +84,8 @@ BINANCE_PAY_ID = _env("BINANCE_PAY_ID")     # opcional: se muestra junto al QR
 USDT_RED = _env("USDT_RED") or "BSC (BEP20)"
 # Precio del ESPECIAL (sale entre parentesis en el menu y en la venta)
 VALOR_ESPECIAL = _env("VALOR_ESPECIAL") or "$4.99"
+# Precio de TODA la informacion del dia en el VIP (super promo)
+PRECIO_DIA = _env("PRECIO_DIA") or "$15.99"
 USDT_DIRECCION = _env("USDT_DIRECCION") or "0x45d608619ea45555d3c458fb178113f7d96c109a"
 BONO_TEXTO = _env("BONO_TEXTO") or "Bono de bienvenida AQUÍ"
 ZONA_HORARIA = _env("ZONA_HORARIA") or "America/Caracas"
@@ -323,6 +325,10 @@ PAGINA_INICIO = """
                     {% if vista.venta %}
                     <label class="check"><input type="checkbox" name="pub_venta" value="1" checked>2) Venta del ESPECIAL con el QR (aquí se vende el valor)</label>
                     <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.venta }}</pre>
+                    {% endif %}
+                    {% if vista.promo %}
+                    <label class="check"><input type="checkbox" name="pub_promo" value="1" checked>3) Súper promo VIP: todo el día por {{ vista.precio_dia }}, con el QR</label>
+                    <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.promo }}</pre>
                     {% endif %}
                     {% for n, t in vista.gratis %}
                     <label class="check"><input type="checkbox" name="pick" value="{{ n }}" checked>&#127873; {{ t }}</label>
@@ -958,6 +964,66 @@ def picks_menu(menu):
     return salida
 
 
+def _precio(t):
+    try:
+        return float(str(t).replace("$", "").replace(",", ".").strip())
+    except ValueError:
+        return None
+
+
+def _cuenta(n, uno, varios):
+    return f"{n} {uno if n == 1 else varios}"
+
+
+def promo_vip(menu, valor, precio_dia):
+    """Super promo: resumen de todo lo que trae el VIP hoy (sin ejemplares) + precio del dia + QR."""
+    dia = menu["dia"] or DIAS[ahora_local().weekday()]
+    lineas, total, especiales = [], 0, 0
+    hay = set()
+    for h in menu["hipodromos"]:
+        vip = [i for i in h["items"] if not i.get("free")]
+        if not vip:
+            continue
+        c = {k: sum(1 for i in vip if i["etiqueta"] == k) for k in ("VALOR", "BEST BET", "RATA DEL DÍA", "RATA FUERTE")}
+        partes = []
+        if c["VALOR"]:
+            partes.append("\U0001F31F " + _cuenta(c["VALOR"], "Especial", "Especiales"))
+        if c["BEST BET"]:
+            partes.append("\u2B50 " + _cuenta(c["BEST BET"], "Best Bet", "Best Bets"))
+        if c["RATA DEL DÍA"]:
+            partes.append("\U0001F400 " + _cuenta(c["RATA DEL DÍA"], "Rata del día", "Ratas del día"))
+        if c["RATA FUERTE"]:
+            partes.append("\U0001F400\U0001F525 " + _cuenta(c["RATA FUERTE"], "Rata fuerte", "Ratas fuertes"))
+        lineas.append(f"\U0001F3C7 <b>{esc(h['nombre'].upper())}</b>\n      " + " · ".join(partes))
+        total += len(vip)
+        hay.update(k for k, v in c.items() if v)
+        especiales += c["VALOR"]
+    if not total:
+        return None
+    precio_uno = _precio(valor)
+    suelto = ""
+    if especiales and precio_uno:
+        suelto = (f"\U0001F31F Cada ESPECIAL suelto: <b>{esc(valor)}</b>"
+                  + (f" (los {especiales} = ${precio_uno * especiales:.2f})" if especiales > 1 else "") + "\n")
+    visible = esc(contacto_visible(VIP_LINK)) if VIP_LINK else ""
+    return (
+        f"\U0001F525<b>SÚPER PROMO CORRIDATV · {dia}</b>\U0001F525\n\n"
+        "Entra al <b>VIP</b> y llévate <b>TODAS las paradas de hoy</b> detalladas "
+        "(ejemplar, número, ML, jugada y reseña):\n\n"
+        + "\n".join(lineas)
+        + f"\n\n\U0001F4E6 <b>{_cuenta(total, 'parada', 'paradas')} en total</b>\n\n"
+        + suelto
+        + f"\U0001F381 <b>TODO EL DÍA POR SOLO {esc(precio_dia)}</b>"
+        + (" (" + " + ".join(n for k, n in (("VALOR", "especiales"), ("RATA", "ratas"), ("BEST BET", "best bets"))
+                           if any(x.startswith(k) for x in hay)) + ")" if hay else "")
+        + "\n\n"
+        "\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
+        f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
+        + (f"\n\U0001F4E9 Comprobante a: {visible}" if visible else "")
+        + "\n\n<b>ESTO NO ES CORAZONADA</b> \u2705"
+    )
+
+
 def venta_especiales(menu, valor):
     """Mensaje de venta de los VALOR DEL DIA (ESPECIAL) con su reseña, sin nombre ni numero."""
     bloques = []
@@ -1324,6 +1390,8 @@ def vista_menu():
     vista = {
         "publico": html_a_texto(menu_publico(menu, nota, ahora_local(), VALOR_ESPECIAL)),
         "venta": html_a_texto(venta) if venta else "",
+        "promo": html_a_texto(promo_vip(menu, VALOR_ESPECIAL, PRECIO_DIA) or ""),
+        "precio_dia": PRECIO_DIA,
         "gratis": [(n, p["titulo"]) for n, p in enumerate(picks) if p["destino"] == "gratis"],
         "vip": [(n, p["titulo"]) for n, p in enumerate(picks) if p["destino"] == "vip"],
     }
@@ -1351,11 +1419,13 @@ def publicar_menu():
     if quiere_json:
         pub_menu = bool(datos.get("pub_menu", True))
         pub_venta = bool(datos.get("pub_venta", True))
+        pub_promo = bool(datos.get("pub_promo", True))
         sel = datos.get("picks", "todos")
         elegidos = range(len(picks)) if sel == "todos" else [int(x) for x in (sel or [])]
     else:
         pub_menu = marcado(datos, "pub_menu")
         pub_venta = marcado(datos, "pub_venta")
+        pub_promo = marcado(datos, "pub_promo")
         elegidos = [int(x) for x in request.form.getlist("pick") if x.isdigit()]
 
     resultados = []
@@ -1371,6 +1441,13 @@ def publicar_menu():
         opciones = {"reply_markup": teclado_contacto(), "foto": foto, "foto_url": foto_url}
         for r in despachar_telegram("gratis", {"gratis": venta}, gratis=opciones):
             r["grupo"] = "venta ESPECIAL gratis"
+            resultados.append(r)
+    promo = promo_vip(menu, VALOR_ESPECIAL, PRECIO_DIA) if pub_promo else None
+    if promo:
+        foto, foto_url = qr_binance()
+        opciones = {"reply_markup": teclado_contacto(), "foto": foto, "foto_url": foto_url}
+        for r in despachar_telegram("gratis", {"gratis": promo}, gratis=opciones):
+            r["grupo"] = "super promo VIP gratis"
             resultados.append(r)
     fecha = ahora_local().strftime("%Y-%m-%d %H:%M")
     for idx in elegidos:
