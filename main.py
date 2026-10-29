@@ -62,10 +62,17 @@ CONTACTO_INFO = _env("CONTACTO_INFO") or "https://t.me/Intelligence_suite_gratis
 # Donde se manda el comprobante de pago (si no se configura, es el mismo CONTACTO_INFO)
 VIP_LINK = _env("VIP_LINK") or CONTACTO_INFO
 # Firma del canal: va en la descripcion de Telegram y al pie del menu del dia
-DESCRIPCION_CANAL = _env("DESCRIPCION_CANAL") or (
-    "Artefacto apoyado por IA ClaudeCode que analiza el mercado buscando el pick "
-    "que cumpla con su fórmula de calibración."
+# Firma al pie del menu del dia (y descripcion del canal)
+FIRMA_MENU = (
+    "ESTO NO ES CORAZONADA\n"
+    "⏱️ HORAS DE ESTUDIO ✅\n"
+    "👁️ SEGUIMIENTO ✅\n"
+    "🎥 VIDEO ✅\n"
+    "🏇 EJERCICIOS ✅\n"
+    "🐎 ESTABLO VIRTUAL ✅\n"
+    "👥 MANEJADO POR UN GRAN EQUIPO"
 )
+DESCRIPCION_CANAL = _env("DESCRIPCION_CANAL") or FIRMA_MENU
 BONO_LINK = _env("BONO_LINK")               # link de afiliado (opcional, por ahora vacio)
 
 # --- Pago con Binance ---
@@ -310,13 +317,23 @@ PAGINA_INICIO = """
                 <button type="submit" formaction="/menu-vista" class="b-azul">&#128065; Vista previa</button>
                 {% if vista %}
                 <div style="margin-top:16px">
-                    <label class="check"><input type="checkbox" name="pub_menu" value="1" checked>&#128275; Menú público al grupo gratis (sin nombres ni números)</label>
+                    <div style="background:#14532d;padding:8px 12px;border-radius:6px;font-weight:bold;margin-top:6px">&#128275; VA AL GRUPO GRATIS</div>
+                    <label class="check"><input type="checkbox" name="pub_menu" value="1" checked>1) Menú del día (sin nombres ni números)</label>
                     <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.publico }}</pre>
-                    <label>&#128274; Picks completos al VIP (marca los que quieres enviar ahora):</label>
-                    {% for p in vista.picks %}
-                    <label class="check"><input type="checkbox" name="pick" value="{{ loop.index0 }}" checked>{{ p }}</label>
+                    {% if vista.venta %}
+                    <label class="check"><input type="checkbox" name="pub_venta" value="1" checked>2) Venta del ESPECIAL con el QR (aquí se vende el valor)</label>
+                    <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.venta }}</pre>
+                    {% endif %}
+                    {% for n, t in vista.gratis %}
+                    <label class="check"><input type="checkbox" name="pick" value="{{ n }}" checked>&#127873; {{ t }}</label>
                     {% endfor %}
-                    {% if not vista.picks %}<div class="ayuda">No se encontró ningún pick en el menú.</div>{% endif %}
+                    {% if not vista.gratis %}<div class="ayuda">Ningún pick marcado como "parada free 1/2" en el menú.</div>{% endif %}
+
+                    <div style="background:#7c2d12;padding:8px 12px;border-radius:6px;font-weight:bold;margin-top:16px">&#128274; VA AL GRUPO VIP (picks completos)</div>
+                    {% for n, t in vista.vip %}
+                    <label class="check"><input type="checkbox" name="pick" value="{{ n }}" checked>{{ t }}</label>
+                    {% endfor %}
+                    {% if not vista.vip %}<div class="ayuda">No hay picks para el VIP.</div>{% endif %}
                     <button type="submit" formaction="/webhook-menu">&#128640; Publicar lo marcado</button>
                 </div>
                 {% endif %}
@@ -597,6 +614,11 @@ def teclado_contacto(con_comprobante=True):
     return {"inline_keyboard": filas} if filas else None
 
 
+def firma_html():
+    lineas = FIRMA_MENU.split("\n")
+    return f"<b>{esc(lineas[0])}</b>\n" + "\n".join(f"<b>{esc(l)}</b>" for l in lineas[1:])
+
+
 def texto_descripcion():
     """Descripcion del canal en Telegram (maximo 255 caracteres)."""
     info = url_publica(CONTACTO_INFO)
@@ -718,8 +740,7 @@ def mensaje_programacion(lineas, nota, fecha, valor="", resena=""):
     texto = f"\U0001F5D3 <u><b>PROGRAMACIÓN DEL {dia}:</b></u>\n\n{cuerpo}"
     if (nota or "").strip():
         texto += f"\n\n{esc(nota.strip())}"
-    if DESCRIPCION_CANAL:
-        texto += f"\n\n\U0001F916 <i>{esc(DESCRIPCION_CANAL)}</i>"
+    texto += "\n\n" + firma_html()
     return texto
 
 
@@ -865,6 +886,10 @@ def parsear_menu(texto):
             ultimo = {"etiqueta": etiqueta, "hora": m.group(1).upper().replace(".", ""),
                       "carrera": m.group(2), "numero": m.group(3), "caballo": m.group(4).strip(),
                       "ml": m.group(5).strip(), "tipo": m.group(6).strip(" ·-|:,"), "resena": ""}
+            mfree = _re.search(r"parada\s*free\s*(\d+)", ultimo["tipo"], _re.I)
+            if mfree:
+                ultimo["free"] = mfree.group(1)
+                ultimo["tipo"] = _re.sub(r"parada\s*free\s*\d+", "", ultimo["tipo"], flags=_re.I).strip(" ·-|:,")
             actual["items"].append(ultimo)
         elif not nueva and not m and ultimo is not None and ultimo["etiqueta"] == "VALOR" and "HOY NO HAY" not in plano:
             ultimo["resena"] = (ultimo["resena"] + " " + linea).strip()
@@ -892,39 +917,71 @@ def menu_publico(menu, nota, fecha, valor):
     for h in menu["hipodromos"]:
         filas = [f"\U0001F3C7 <u><b>{esc(h['nombre'].upper())}</b></u>"]
         for i in sorted(h["items"], key=_orden_hora):
-            filas.append(f"\u2611\uFE0F <b>{esc(nombres[i['etiqueta']])}</b> | {esc(i['hora'])} · C{esc(i['carrera'])}")
+            nombre = nombres[i["etiqueta"]]
+            if i.get("free"):
+                nombre = f"\U0001F381 PARADA FREE {i['free']} ({nombre.split(' ', 1)[1]})"
+            filas.append(f"\u2611\uFE0F <b>{esc(nombre)}</b> | {esc(i['hora'])} · C{esc(i['carrera'])}")
             if i["etiqueta"] == "VALOR" and i["resena"]:
                 filas.append(f"      \U0001F4DD <i>{esc(i['resena'])}</i>")
         bloques.append("\n".join(filas))
     texto = f"\U0001F5D3 <u><b>PROGRAMACIÓN DEL {dia}:</b></u>\n\n" + "\n\n".join(bloques)
     if (nota or "").strip():
         texto += f"\n\n{esc(nota.strip())}"
-    if DESCRIPCION_CANAL:
-        texto += f"\n\n\U0001F916 <i>{esc(DESCRIPCION_CANAL)}</i>"
+    texto += "\n\n" + firma_html()
     return texto
 
 
-def picks_vip(menu):
-    """Lista de (titulo, etiqueta, texto) con cada pick completo para el VIP."""
+def picks_menu(menu):
+    """Lista de picks: {titulo, etiqueta, texto, destino}. Los marcados 'parada free N' van al gratis."""
     salida = []
     for h in menu["hipodromos"]:
         for i in sorted(h["items"], key=_orden_hora):
             if i["etiqueta"] == "VALOR":
                 etq = "ESPECIAL"
-                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], i["tipo"],
-                                     i["ml"], "", i["resena"], hora=i["hora"])
             elif i["etiqueta"] == "BEST BET":
                 etq = f"BEST BET {h['nombre'].upper()}"
-                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], i["tipo"],
-                                     i["ml"], "", "", hora=i["hora"])
             else:
                 etq = "RATAS DEL DÍA" if i["etiqueta"] == "RATA DEL DÍA" else "RATA FUERTE"
+            destino = "vip"
+            if i.get("free"):
+                etq = f"PARADA FREE {i['free']} · {etq}"
+                destino = "gratis"
+            if es_rata(etq):
                 texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "",
                                      i["ml"], "", "", pago=i["tipo"], hora=i["hora"])
+            else:
+                texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], i["tipo"],
+                                     i["ml"], "", i["resena"] if i["etiqueta"] == "VALOR" else "", hora=i["hora"])
             titulo = (f"{etq} · {h['nombre']} C{i['carrera']} · #{i['numero']} {i['caballo']} ({i['ml']})"
                       + (f" · {i['tipo']}" if i["tipo"] else "") + f" · {i['hora']}")
-            salida.append((titulo, etq, texto))
+            salida.append({"titulo": titulo, "etiqueta": etq, "texto": texto, "destino": destino})
     return salida
+
+
+def venta_especiales(menu, valor):
+    """Mensaje de venta de los VALOR DEL DIA (ESPECIAL) con su reseña, sin nombre ni numero."""
+    bloques = []
+    for h in menu["hipodromos"]:
+        for i in sorted(h["items"], key=_orden_hora):
+            if i["etiqueta"] == "VALOR" and not i.get("free"):
+                b = f"\U0001F3C7 <b>{esc(h['nombre'].upper())}</b> · \u23F0 {esc(i['hora'])} · C{esc(i['carrera'])}"
+                if i["resena"]:
+                    b += f"\n\U0001F4DD <i>{esc(i['resena'])}</i>"
+                bloques.append(b)
+    if not bloques:
+        return None
+    contacto = VIP_LINK
+    visible = esc(contacto_visible(contacto)) if contacto else ""
+    return (
+        f"\U0001F31F<b>ESPECIAL DE HOY ({esc(valor)})</b>\U0001F31F\n\n"
+        + "\n\n".join(bloques)
+        + "\n\n\U0001F449<b>LA PARADA FUERTE DE LA JORNADA!</b>\U0001F525\n"
+        "\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
+        f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
+        + (f"\n\U0001F4E9 Comprobante a: {visible}" if visible else "")
+        + f"\n\n\U0001F3C3... Paga {esc(valor)} en USDT con el QR (desde Binance u otro exchange), "
+        "manda tu comprobante y recibes el ESPECIAL antes de la carrera."
+    )
 
 
 def html_a_texto(t):
@@ -1262,9 +1319,13 @@ def vista_menu():
     if not menu["hipodromos"]:
         return render_panel(detalle="No se encontró ningún hipódromo (🏇) con picks en el menú pegado.",
                             menu_texto=texto, menu_nota=nota, status=422)
+    picks = picks_menu(menu)
+    venta = venta_especiales(menu, VALOR_ESPECIAL)
     vista = {
         "publico": html_a_texto(menu_publico(menu, nota, ahora_local(), VALOR_ESPECIAL)),
-        "picks": [t for t, _, _ in picks_vip(menu)],
+        "venta": html_a_texto(venta) if venta else "",
+        "gratis": [(n, p["titulo"]) for n, p in enumerate(picks) if p["destino"] == "gratis"],
+        "vip": [(n, p["titulo"]) for n, p in enumerate(picks) if p["destino"] == "vip"],
     }
     return render_panel(vista=vista, menu_texto=texto, menu_nota=nota)
 
@@ -1286,13 +1347,15 @@ def publicar_menu():
     if validar:
         return responder_error(quiere_json, validar)
 
-    picks = picks_vip(menu)
+    picks = picks_menu(menu)
     if quiere_json:
         pub_menu = bool(datos.get("pub_menu", True))
+        pub_venta = bool(datos.get("pub_venta", True))
         sel = datos.get("picks", "todos")
         elegidos = range(len(picks)) if sel == "todos" else [int(x) for x in (sel or [])]
     else:
         pub_menu = marcado(datos, "pub_menu")
+        pub_venta = marcado(datos, "pub_venta")
         elegidos = [int(x) for x in request.form.getlist("pick") if x.isdigit()]
 
     resultados = []
@@ -1302,16 +1365,25 @@ def publicar_menu():
         for r in despachar_telegram("gratis", {"gratis": publico}, gratis=opciones):
             r["grupo"] = "menu gratis"
             resultados.append(r)
+    venta = venta_especiales(menu, VALOR_ESPECIAL) if pub_venta else None
+    if venta:
+        foto, foto_url = qr_binance()
+        opciones = {"reply_markup": teclado_contacto(), "foto": foto, "foto_url": foto_url}
+        for r in despachar_telegram("gratis", {"gratis": venta}, gratis=opciones):
+            r["grupo"] = "venta ESPECIAL gratis"
+            resultados.append(r)
     fecha = ahora_local().strftime("%Y-%m-%d %H:%M")
     for idx in elegidos:
         if not 0 <= idx < len(picks):
             continue
-        titulo, etq, texto_pick = picks[idx]
-        imagen = imagen_etiqueta(etq)
-        for r in despachar_telegram("vip", {"vip": texto_pick}, vip={"foto": imagen} if imagen else {}):
-            r["grupo"] = f"VIP {etq}"
+        p = picks[idx]
+        imagen = imagen_etiqueta(p["etiqueta"])
+        destino = p["destino"]
+        opciones = {"foto": imagen} if imagen else {}
+        for r in despachar_telegram(destino, {destino: p["texto"]}, **{destino: opciones}):
+            r["grupo"] = f"{'GRATIS' if destino == 'gratis' else 'VIP'} {p['etiqueta']}"
             resultados.append(r)
-            guardar_en_registro(fecha, titulo, etq, "", "", "vip", [r])
+            guardar_en_registro(fecha, p["titulo"], p["etiqueta"], "", "", destino, [r])
     if not resultados:
         return responder_error(quiere_json, ["no marcaste nada para publicar"])
     return responder_envio(quiere_json, resultados, {"picks_enviados": len([i for i in elegidos if 0 <= i < len(picks)])})
