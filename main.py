@@ -317,7 +317,7 @@ PAGINA_INICIO = """
         <datalist id="lista-etiquetas">{% for e in etiquetas %}<option value="{{ e.nombre }}">{% endfor %}</datalist>
 
         <!-- 0. MENU PEGADO -->
-        <details {% if vista or cola %}open{% endif %}>
+        <details {% if vista or cola or resultados_picks %}open{% endif %}>
             <summary>&#128203; 0. Jornada del día (pega el menú y sale todo solo)</summary>
             <form method="POST">
                 <label>Pega aquí el menú de etiquetas tal cual:</label>
@@ -355,6 +355,28 @@ PAGINA_INICIO = """
                 </div>
                 {% endif %}
             </form>
+            {% if resultados_picks %}
+            <form action="/webhook-resultados" method="POST" style="margin-top:18px">
+                <div style="background:#1e3a8a;padding:8px 12px;border-radius:6px;font-weight:bold">&#127937; Resultados de la jornada</div>
+                <div class="ayuda">✅ = ganamos (en la RATA: la rata perdió). ❌ = no se dio. Deja "—" lo que aún no corre.</div>
+                {% for n, t, rata in resultados_picks %}
+                <div style="padding:6px 0;border-bottom:1px solid #334155">
+                    <div style="font-size:12px">{{ t }}</div>
+                    <div class="fila">
+                        <div><select name="res_{{ n }}">
+                            <option value="">— sin resultado</option>
+                            <option value="gano">{% if rata %}✅ La rata perdió (festejo){% else %}✅ Ganó (festejo){% endif %}</option>
+                            <option value="perdio">{% if rata %}❌ La rata ganó{% else %}❌ Perdió{% endif %}</option>
+                        </select></div>
+                        <div><input type="text" name="pago_{{ n }}" placeholder="Pagó (opcional, ej: $14.60)"></div>
+                    </div>
+                </div>
+                {% endfor %}
+                <label class="check"><input type="checkbox" name="resumen" value="1" checked>Publicar también el resumen del día (✅ y ❌) en el grupo gratis</label>
+                <label class="check"><input type="checkbox" name="fijar" value="1">Fijar los festejos en el canal</label>
+                <button type="submit" class="b-naranja">&#127881; Publicar resultados</button>
+            </form>
+            {% endif %}
             {% if cola %}
             <div style="margin-top:18px">
                 <label>&#9201;&#65039; Mensajes programados (hora de Venezuela):</label>
@@ -1149,6 +1171,92 @@ except ImportError:  # pragma: no cover
     _fcntl = None
 
 COLA_PATH = os.path.join(BASE_DIR, "cola.json")
+JORNADA_PATH = os.path.join(BASE_DIR, "jornada.json")
+
+
+def guardar_jornada(menu_texto, nota):
+    try:
+        with open(JORNADA_PATH, "w", encoding="utf-8") as f:
+            json.dump({"fecha": ahora_local().strftime("%Y-%m-%d"), "menu": menu_texto, "nota": nota}, f,
+                      ensure_ascii=False)
+    except OSError:
+        pass
+
+
+def leer_jornada():
+    try:
+        with open(JORNADA_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _corta(etq):
+    """'PARADA FREE 1 · RATAS DEL DÍA' -> ('PARADA FREE 1', 'RATAS DEL DÍA')."""
+    partes = etq.split(" · ")
+    return (partes[0], partes[1]) if len(partes) > 1 else (etq, etq)
+
+
+def _ejemplar(p):
+    i = p["item"]
+    return (f"\U0001F3C7 {esc(p['hipodromo'])} · C{esc(i['carrera'])} · "
+            f"<b>#{esc(i['numero'])} {esc(i['caballo'])}</b>")
+
+
+def festejo(p, pago="", cta=True):
+    """✅ Festejo llamativo (va al grupo gratis para atraer seguidores)."""
+    titulo, base = _corta(p["etiqueta"])
+    free = p["destino"] == "gratis"
+    cab = f"✅✅✅✅<b>¡{esc(titulo)}!</b>✅✅✅✅"
+    if es_rata(p["etiqueta"]):
+        cuerpo = (f"\U0001F400 <b>¡JUGARON SU RATA!</b> A ESTA LE DOLÍAN LAS PATAS…\n\n"
+                  f"{_ejemplar(p)}\n"
+                  "El favorito vulnerable <b>LO MARCAMOS EN ROJO</b> \U0001F534 y no pudo ganar, tal como lo avisamos.")
+    else:
+        jugada = p["item"].get("tipo") or ""
+        cuerpo = (f"\U0001F525\U0001F525 <b>¡ES VERDEEEEE!</b> \U0001F525\U0001F525\n\n"
+                  f"{_ejemplar(p)}"
+                  + (f"\n\U0001F3AF {esc(jugada)}" if jugada else "")
+                  + f"\n\n<i>{'¡Y te la regalamos GRATIS!' if free else 'Otra parada que nos entra.'} "
+                  "La lectura fue buena. Gracias a todos por siempre confiar.</i>")
+    texto = f"{cab}\n\n{cuerpo}"
+    if pago:
+        texto += f"\n\n\U0001F4B0 <b>PAGÓ {esc(pago)}</b>"
+    texto += "\n\n<b>¡SEGUIMOS TRABAJANDO!</b> \U0001F4AA"
+    if not free and cta:
+        texto += f"\n\n\U0001F512 Esta iba en el VIP. Mañana entra: <b>todo el día por {esc(PRECIO_DIA)}</b>"
+    return texto
+
+
+def marca_negativa(p):
+    """❌ Marca honesta cuando el pick no se da."""
+    titulo, _ = _corta(p["etiqueta"])
+    if es_rata(p["etiqueta"]):
+        detalle = "Esta vez el favorito cumplió y ganó."
+    else:
+        detalle = "No se nos dio esta vez."
+    return (f"\u274C <b>{esc(titulo)}</b>\n{_ejemplar(p)}\n{detalle} "
+            "Seguimos con disciplina y estudio. \U0001F4AA")
+
+
+def resumen_resultados(menu, marcados):
+    """📊 Resumen del dia para el grupo gratis: todos los ✅ y ❌."""
+    dia = menu["dia"] or DIAS[ahora_local().weekday()]
+    lineas, g, perd = [], 0, 0
+    for p, res in marcados:
+        titulo, _ = _corta(p["etiqueta"])
+        i = p["item"]
+        icono = "\u2705" if res == "gano" else "\u274C"
+        g += res == "gano"
+        perd += res == "perdio"
+        lineas.append(f"{icono} {esc(titulo)} · {esc(p['hipodromo'])} C{esc(i['carrera'])} · #{esc(i['numero'])} {esc(i['caballo'])}")
+    return (
+        f"\U0001F4CA <b>RESULTADOS CORRIDATV · {dia}</b>\n\n"
+        + "\n".join(lineas)
+        + f"\n\n<b>\u2705 {g} {'acierto' if g == 1 else 'aciertos'} · \u274C {perd}</b>\n\n"
+        + f"\U0001F512 Mañana todas las paradas en el VIP por <b>{esc(PRECIO_DIA)}</b>\n\n"
+        + firma_html()
+    )
 _cola_lock = _threading.Lock()
 
 
@@ -1540,6 +1648,13 @@ def resumir(resultados):
 # ==========================================
 # RESPUESTAS COMUNES
 # ==========================================
+def _picks_jornada():
+    j = leer_jornada()
+    if not j:
+        return []
+    return [(n, p["titulo"], es_rata(p["etiqueta"])) for n, p in enumerate(picks_menu(parsear_menu(j["menu"])))]
+
+
 def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200, **extra):
     return render_template_string(
         PAGINA_INICIO,
@@ -1563,6 +1678,7 @@ def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200, *
         menu_nota=extra.get("menu_nota", NOTA_HORARIOS),
         cola=cola_para_panel(),
         programado=extra.get("programado", ""),
+        resultados_picks=_picks_jornada(),
     ), status
 
 
@@ -1740,6 +1856,7 @@ def publicar_menu():
     if not items:
         return responder_error(quiere_json, ["no hay nada que programar (¿las carreras ya pasaron? usa MODO PRUEBA)"])
     encolar(items)
+    guardar_jornada(texto, nota)
     arrancar_hilo_cola()
     procesar_cola()  # lo que toca ya (menu, VIP) sale en este momento
 
@@ -1748,6 +1865,53 @@ def publicar_menu():
         return jsonify({"ok": True, "programados": len(items), "plan": resumen}), 200
     return render_panel(programado=f"Jornada programada: {len(items)} mensajes. Abajo ves la hora de cada uno "
                                    "y si ya salió (✅) o falló (❌).")
+
+
+@app.route("/webhook-resultados", methods=["POST"])
+def publicar_resultados():
+    """Festejos ✅, marcas ❌ y resumen. Form: res_N = gano|perdio, pago_N. JSON igual."""
+    error = chequeo_previo()
+    if error:
+        return error
+    quiere_json, datos = leer_datos()
+    jornada = leer_jornada()
+    texto = campo(datos, "menu") or (jornada or {}).get("menu", "")
+    menu = parsear_menu(texto)
+    picks = picks_menu(menu)
+    if not picks:
+        return responder_error(quiere_json, ["no hay jornada guardada: programa primero el menú del día"])
+
+    marcados = []
+    for n, p in enumerate(picks):
+        res = campo(datos, f"res_{n}").lower()
+        if res in ("gano", "perdio"):
+            marcados.append((p, res, campo(datos, f"pago_{n}")))
+    if not marcados:
+        return responder_error(quiere_json, ["marca al menos un pick con ✅ o ❌"])
+    fijar = marcado(datos, "fijar")
+
+    resultados = []
+    for p, res, pago in marcados:
+        foto = imagen_etiqueta(p["etiqueta"]) if (res == "gano" and es_rata(p["etiqueta"])) else None
+        if res == "gano":
+            texto_m = festejo(p, pago)
+            destino = "gratis" if p["destino"] == "gratis" else "ambos"   # los verdes del VIP tambien se festejan en el gratis
+            op = {"foto": foto, "fijar": fijar, "reply_markup": teclado_contacto(con_comprobante=False)}
+        else:
+            texto_m = marca_negativa(p)
+            destino = p["destino"]                                     # el ❌ va donde se dio el pick
+            op = {}
+        texto_vip = festejo(p, pago, cta=False) if res == "gano" else texto_m
+        for r in despachar_telegram(destino, {"gratis": texto_m, "vip": texto_vip}, gratis=op, vip=op):
+            r["grupo"] = f"{'✅' if res == 'gano' else '❌'} {r['grupo']} {_corta(p['etiqueta'])[0]}"
+            resultados.append(r)
+    if marcado(datos, "resumen") or (quiere_json and datos.get("resumen", True)):
+        resumen = resumen_resultados(menu, [(p, r) for p, r, _ in marcados])
+        for r in despachar_telegram("gratis", {"gratis": resumen},
+                                    gratis={"reply_markup": teclado_contacto(con_comprobante=False)}):
+            r["grupo"] = "📊 resumen gratis"
+            resultados.append(r)
+    return responder_envio(quiere_json, resultados)
 
 
 @app.route("/tick", methods=["GET", "POST"])
