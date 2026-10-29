@@ -917,6 +917,22 @@ _DIAS_TXT = {"lunes": "LUNES", "martes": "MARTES", "miercoles": "MIÉRCOLES", "j
              "viernes": "VIERNES", "sabado": "SÁBADO", "domingo": "DOMINGO"}
 
 
+_RE_FILA = _re.compile(r"^\s*([0-9]{1,2}:[0-9]{2}\s*[AaPp]\.?\s*[Mm]\.?)\s+(.+?)\s+C\s*(\d+)\s+(.+)$")
+_RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*\(([^)]+)\)\s*[·\-|:,]?\s*(.*)$")
+
+
+def _etiqueta_de(plano):
+    if "BEST BET" in plano:
+        return "BEST BET"
+    if "RATA" in plano and "FUERTE" in plano:
+        return "RATA FUERTE"
+    if "RATA" in plano:
+        return "RATA DEL DÍA"
+    if "VALOR" in plano or "ESPECIAL" in plano:
+        return "VALOR"
+    return None
+
+
 def _sin_acentos(t):
     return "".join(c for c in _ud.normalize("NFD", t) if _ud.category(c) != "Mn").upper()
 
@@ -937,10 +953,36 @@ def parsear_menu(texto):
         if not linea:
             continue
         plano = _sin_acentos(linea)
-        if dia is None and "ETIQUETAS" in plano:
+        if dia is None and ("ETIQUETAS" in plano or "PARADAS" in plano) and not _RE_FILA.match(linea):
             for k, v in _DIAS_TXT.items():
                 if k.upper() in plano:
                     dia = v
+            continue
+        # Formato tabla: "1:10 PM  Belmont Park  C1  💰 VALOR · #5 True Adirondacker (5/1) jugamos 4nini"
+        fila = _RE_FILA.match(cruda.strip())
+        if fila:
+            hora, nombre_hip, carrera, parada = fila.groups()
+            etq = _etiqueta_de(_sin_acentos(parada))
+            mp = _RE_PICK_FILA.search(parada)
+            if etq and mp:
+                nombre_hip = nombre_hip.strip(" \t·|")
+                actual = next((h for h in hipodromos if h["nombre"].lower() == nombre_hip.lower()), None)
+                if actual is None:
+                    actual = {"nombre": nombre_hip, "items": []}
+                    hipodromos.append(actual)
+                ultimo = {"etiqueta": etq, "hora": hora.upper().replace(".", "").replace(" ", "")[:-2] + " " + hora.upper().replace(".", "")[-2:],
+                          "carrera": carrera, "numero": mp.group(1), "caballo": mp.group(2).strip(),
+                          "ml": mp.group(3).strip(), "tipo": mp.group(4).strip(" ·-|:,"), "resena": ""}
+                mfree = _re.search(r"parada\s*free\s*(\d+)", ultimo["tipo"], _re.I)
+                if mfree:
+                    ultimo["free"] = mfree.group(1)
+                    ultimo["tipo"] = _re.sub(r"parada\s*free\s*\d+", "", ultimo["tipo"], flags=_re.I).strip(" ·-|:,")
+                actual["items"].append(ultimo)
+                etiqueta = etq
+            continue
+        if ultimo is not None and plano.startswith("RESENA"):
+            if ultimo["etiqueta"] == "VALOR":
+                ultimo["resena"] = (ultimo["resena"] + " " + _re.sub(r"(?i)^rese[ñn]a\s*(vip)?\s*:?\s*", "", linea)).strip()
             continue
         if linea.startswith("\U0001F3C7"):
             actual = {"nombre": linea.lstrip("\U0001F3C7").strip(), "items": []}
