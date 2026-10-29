@@ -4,3 +4,5 @@ cola.json.lock
 cola.json.tmp
 __pycache__/
 jornada.json
+accesos.json
+accesos.json.tmp
