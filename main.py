@@ -86,6 +86,10 @@ USDT_RED = _env("USDT_RED") or "BSC (BEP20)"
 VALOR_ESPECIAL = _env("VALOR_ESPECIAL") or "$4.99"
 # Precio de TODA la informacion del dia en el VIP (super promo)
 PRECIO_DIA = _env("PRECIO_DIA") or "$15.99"
+# Precio de todos los caballos de valor juntos (una sola promocion)
+PRECIO_VALORES = _env("PRECIO_VALORES") or "$9.99"
+# Zona horaria de las horas que vienen en tu menu (hipodromos de EE. UU. = hora del Este)
+ZONA_MENU = _env("ZONA_MENU") or "America/New_York"
 USDT_DIRECCION = _env("USDT_DIRECCION") or "0x45d608619ea45555d3c458fb178113f7d96c109a"
 BONO_TEXTO = _env("BONO_TEXTO") or "Bono de bienvenida AQUÍ"
 ZONA_HORARIA = _env("ZONA_HORARIA") or "America/Caracas"
@@ -128,6 +132,7 @@ ETIQUETAS = [
     {"nombre": "PARADA FREE 1", "destino": "gratis", "emoji": "🎁"},
     {"nombre": "PARADA FREE 2", "destino": "gratis", "emoji": "🎁"},
     {"nombre": "ESPECIAL", "destino": "vip", "emoji": "🌟"},
+    {"nombre": "CABALLO DE VALOR", "destino": "vip", "emoji": "💎"},
     {"nombre": "STAKAZO 15", "destino": "vip", "emoji": "💎"},
     {"nombre": "RATAS DEL DÍA", "destino": "vip", "emoji": "🐀"},
     {"nombre": "RATA FUERTE", "destino": "vip", "emoji": "🐀🔥"},
@@ -300,6 +305,9 @@ PAGINA_INICIO = """
         <div class="aviso-config">{% for a in avisos %}&#9888; {{ a }}<br>{% endfor %}</div>
         {% endif %}
 
+        {% if programado %}
+        <div class="alerta-exito" style="background:#1d4ed8">&#9201;&#65039; {{ programado }}</div>
+        {% endif %}
         {% if entregado_todo %}
         <div class="alerta-exito">&#9989; ENTREGADO Y CONFIRMADO POR TELEGRAM<div class="detalle">{{ detalle }}</div></div>
         {% elif detalle %}
@@ -309,41 +317,59 @@ PAGINA_INICIO = """
         <datalist id="lista-etiquetas">{% for e in etiquetas %}<option value="{{ e.nombre }}">{% endfor %}</datalist>
 
         <!-- 0. MENU PEGADO -->
-        <details {% if vista %}open{% endif %}>
-            <summary>&#128203; 0. Pegar menú del día (todo automático)</summary>
+        <details {% if vista or cola %}open{% endif %}>
+            <summary>&#128203; 0. Jornada del día (pega el menú y sale todo solo)</summary>
             <form method="POST">
                 <label>Pega aquí el menú de etiquetas tal cual:</label>
-                <textarea name="menu" rows="10" placeholder="🏷 Etiquetas · miércoles 28 de octubre&#10;🏇 Belmont Park&#10;* ★ BEST BET: HOY NO HAY&#10;* 💰 VALOR DEL DÍA: ⏰ 3:14 PM · C5 · #12 Duty (6/1) · 4 puesto&#10;* 🟥 RATA DEL DÍA: ⏰ 3:14 PM · C5 · #1 Mortal Lock (5/1) · dar 2 puesto&#10;...">{{ menu_texto }}</textarea>
+                <textarea name="menu" rows="10" placeholder="🏷 Etiquetas · miércoles 28 de octubre&#10;🏇 Belmont Park&#10;* ★ BEST BET: HOY NO HAY&#10;* 💰 VALOR DEL DÍA: ⏰ 3:14 PM · C5 · #12 Duty (6/1) jugar 4 puesto&#10;* 🟥 RATA DEL DÍA: ⏰ 3:14 PM · C5 · #1 Mortal Lock (5/1) parada free 1 dar 2 puesto&#10;...">{{ menu_texto }}</textarea>
                 <label>Nota de horarios:</label>
                 <textarea name="nota" rows="3">{{ menu_nota }}</textarea>
                 <button type="submit" formaction="/menu-vista" class="b-azul">&#128065; Vista previa</button>
                 {% if vista %}
                 <div style="margin-top:16px">
-                    <div style="background:#14532d;padding:8px 12px;border-radius:6px;font-weight:bold;margin-top:6px">&#128275; VA AL GRUPO GRATIS</div>
-                    <label class="check"><input type="checkbox" name="pub_menu" value="1" checked>1) Menú del día (sin nombres ni números)</label>
+                    <div style="background:#14532d;padding:8px 12px;border-radius:6px;font-weight:bold;margin-top:6px">&#128275; GRUPO GRATIS · así sale la jornada</div>
+                    <label class="check"><input type="checkbox" name="pub_menu" value="1" checked>1) Menú del día · sale al publicar</label>
                     <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.publico }}</pre>
-                    {% if vista.venta %}
-                    <label class="check"><input type="checkbox" name="pub_venta" value="1" checked>2) Venta del ESPECIAL con el QR (aquí se vende el valor)</label>
-                    <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.venta }}</pre>
-                    {% endif %}
                     {% if vista.promo %}
-                    <label class="check"><input type="checkbox" name="pub_promo" value="1" checked>3) Súper promo VIP: todo el día por {{ vista.precio_dia }}, con el QR</label>
+                    <label class="check"><input type="checkbox" name="pub_promo" value="1" checked>2) Súper promo VIP {{ vista.precio_dia }} · a los <input type="number" name="min_promo" value="15" style="width:70px;display:inline-block;margin:0 6px"> min</label>
                     <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.promo }}</pre>
                     {% endif %}
-                    {% for n, t in vista.gratis %}
-                    <label class="check"><input type="checkbox" name="pick" value="{{ n }}" checked>&#127873; {{ t }}</label>
+                    <label>3) Paradas FREE con ALERTA · <input type="number" name="min_free" value="60" style="width:70px;display:inline-block;margin:0 6px"> min antes de su carrera:</label>
+                    {% for n, t, h in vista.gratis %}
+                    <label class="check"><input type="checkbox" name="free" value="{{ n }}" checked>&#127873; {{ t }} &nbsp;<span class="ayuda">(sale {{ h }})</span></label>
                     {% endfor %}
                     {% if not vista.gratis %}<div class="ayuda">Ningún pick marcado como "parada free 1/2" en el menú.</div>{% endif %}
+                    {% if vista.valores %}
+                    <label class="check"><input type="checkbox" name="pub_valores" value="1" checked>4) Caballos de valor {{ vista.precio_valores }} · <input type="number" name="min_valores" value="120" style="width:70px;display:inline-block;margin:0 6px"> min antes del primero, y último llamado a los <input type="number" name="min_ultimo" value="30" style="width:60px;display:inline-block;margin:0 6px"> min</label>
+                    <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.valores }}</pre>
+                    {% endif %}
 
-                    <div style="background:#7c2d12;padding:8px 12px;border-radius:6px;font-weight:bold;margin-top:16px">&#128274; VA AL GRUPO VIP (picks completos)</div>
+                    <div style="background:#7c2d12;padding:8px 12px;border-radius:6px;font-weight:bold;margin-top:16px">&#128274; GRUPO VIP · picks completos (salen al publicar)</div>
                     {% for n, t in vista.vip %}
-                    <label class="check"><input type="checkbox" name="pick" value="{{ n }}" checked>{{ t }}</label>
+                    <label class="check"><input type="checkbox" name="vip" value="{{ n }}" checked>{{ t }}</label>
                     {% endfor %}
                     {% if not vista.vip %}<div class="ayuda">No hay picks para el VIP.</div>{% endif %}
-                    <button type="submit" formaction="/webhook-menu">&#128640; Publicar lo marcado</button>
+
+                    <label class="check" style="margin-top:14px;color:#fbbf24"><input type="checkbox" name="prueba" value="1">MODO PRUEBA: enviar todo ya, uno tras otro cada 20 s (ignora las horas)</label>
+                    <button type="submit" formaction="/webhook-menu">&#128640; Programar la jornada</button>
                 </div>
                 {% endif %}
             </form>
+            {% if cola %}
+            <div style="margin-top:18px">
+                <label>&#9201;&#65039; Mensajes programados (hora de Venezuela):</label>
+                {% for c in cola %}
+                <div class="ayuda" style="padding:4px 0;border-bottom:1px solid #334155">
+                    {% if c.estado == 'enviado' %}&#9989;{% elif c.estado == 'fallido' %}&#10060;{% elif c.estado == 'cancelado' %}&#9940;{% else %}&#9203;{% endif %}
+                    <b>{{ c.hora }}</b> · {{ 'GRATIS' if c.destino == 'gratis' else 'VIP' }} · {{ c.titulo }}
+                    {% if c.estado == 'fallido' %}<br><span style="color:#f87171">{{ c.detalle }}</span>{% endif %}
+                </div>
+                {% endfor %}
+                <form action="/cola-cancelar" method="POST">
+                    <button type="submit" class="b-gris">&#9940; Cancelar todo lo pendiente</button>
+                </form>
+            </div>
+            {% endif %}
         </details>
 
         <!-- 1. PROGRAMACION -->
@@ -914,10 +940,42 @@ def _orden_hora(item):
         return datetime.time(23, 59)
 
 
+def momento_carrera(hora_txt, fecha=None):
+    """Hora del menu (zona de los hipodromos, ZONA_MENU) -> datetime con zona. None si no se entiende."""
+    try:
+        t = datetime.datetime.strptime(hora_txt.replace(" ", ""), "%I:%M%p").time()
+    except ValueError:
+        return None
+    fecha = fecha or ahora_local().date()
+    if ZoneInfo is not None:
+        try:
+            return datetime.datetime.combine(fecha, t, tzinfo=ZoneInfo(ZONA_MENU))
+        except Exception:
+            pass
+    return datetime.datetime.combine(fecha, t, tzinfo=datetime.timezone(datetime.timedelta(hours=-4)))
+
+
+def a_local(dt):
+    if dt is None:
+        return None
+    if ZoneInfo is not None:
+        try:
+            return dt.astimezone(ZoneInfo(ZONA_HORARIA))
+        except Exception:
+            pass
+    return dt.astimezone(datetime.timezone(datetime.timedelta(hours=-4)))
+
+
+def hora_ve(hora_txt):
+    """'3:14 PM' del menu -> la misma hora en Venezuela (cambia sola cuando EE. UU. cambia de horario)."""
+    dt = a_local(momento_carrera(hora_txt))
+    return dt.strftime("%I:%M %p").lstrip("0") if dt else hora_txt
+
+
 def menu_publico(menu, nota, fecha, valor):
-    """Menu para el grupo gratis: etiquetas y horas SIN nombre ni numero del ejemplar."""
+    """1) Menu para el grupo gratis: etiquetas y horas SIN nombre ni numero del ejemplar."""
     dia = menu["dia"] or DIAS[fecha.weekday()]
-    nombres = {"BEST BET": "\u2B50 BEST BET", "VALOR": f"\U0001F31F ESPECIAL ({valor})",
+    nombres = {"BEST BET": "⭐ BEST BET", "VALOR": "\U0001F48E CABALLO DE VALOR",
                "RATA DEL DÍA": "\U0001F400 RATA DEL DÍA", "RATA FUERTE": "\U0001F400\U0001F525 RATA FUERTE"}
     bloques = []
     for h in menu["hipodromos"]:
@@ -926,9 +984,7 @@ def menu_publico(menu, nota, fecha, valor):
             nombre = nombres[i["etiqueta"]]
             if i.get("free"):
                 nombre = f"\U0001F381 PARADA FREE {i['free']} ({nombre.split(' ', 1)[1]})"
-            filas.append(f"\u2611\uFE0F <b>{esc(nombre)}</b> | {esc(i['hora'])} · C{esc(i['carrera'])}")
-            if i["etiqueta"] == "VALOR" and i["resena"]:
-                filas.append(f"      \U0001F4DD <i>{esc(i['resena'])}</i>")
+            filas.append(f"☑️ <b>{esc(nombre)}</b> | {esc(hora_ve(i['hora']))} · C{esc(i['carrera'])}")
         bloques.append("\n".join(filas))
     texto = f"\U0001F5D3 <u><b>PROGRAMACIÓN DEL {dia}:</b></u>\n\n" + "\n\n".join(bloques)
     if (nota or "").strip():
@@ -938,12 +994,12 @@ def menu_publico(menu, nota, fecha, valor):
 
 
 def picks_menu(menu):
-    """Lista de picks: {titulo, etiqueta, texto, destino}. Los marcados 'parada free N' van al gratis."""
+    """Lista de picks: {titulo, etiqueta, texto, destino, item, hipodromo}. 'parada free N' van al gratis."""
     salida = []
     for h in menu["hipodromos"]:
         for i in sorted(h["items"], key=_orden_hora):
             if i["etiqueta"] == "VALOR":
-                etq = "ESPECIAL"
+                etq = "CABALLO DE VALOR"
             elif i["etiqueta"] == "BEST BET":
                 etq = f"BEST BET {h['nombre'].upper()}"
             else:
@@ -952,16 +1008,31 @@ def picks_menu(menu):
             if i.get("free"):
                 etq = f"PARADA FREE {i['free']} · {etq}"
                 destino = "gratis"
+            hora = hora_ve(i["hora"])
             if es_rata(etq):
                 texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], "",
-                                     i["ml"], "", "", pago=i["tipo"], hora=i["hora"])
+                                     i["ml"], "", "", pago=i["tipo"], hora=hora)
             else:
                 texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], i["tipo"],
-                                     i["ml"], "", i["resena"] if i["etiqueta"] == "VALOR" else "", hora=i["hora"])
+                                     i["ml"], "", i["resena"] if i["etiqueta"] == "VALOR" else "", hora=hora)
             titulo = (f"{etq} · {h['nombre']} C{i['carrera']} · #{i['numero']} {i['caballo']} ({i['ml']})"
-                      + (f" · {i['tipo']}" if i["tipo"] else "") + f" · {i['hora']}")
-            salida.append({"titulo": titulo, "etiqueta": etq, "texto": texto, "destino": destino})
+                      + (f" · {i['tipo']}" if i["tipo"] else "") + f" · {hora}")
+            salida.append({"titulo": titulo, "etiqueta": etq, "texto": texto, "destino": destino,
+                           "item": i, "hipodromo": h["nombre"]})
     return salida
+
+
+def alerta_free(pick):
+    """3) Alerta llamativa de la PARADA FREE (estilo NUEVO PRONOSTICO)."""
+    return (
+        "\U0001F6A8\U0001F6A8\U0001F6A8 <b>ALERTA DE PARADA</b> \U0001F6A8\U0001F6A8\U0001F6A8\n"
+        f"\U0001F381 <b>{esc(pick['etiqueta'].split(' · ')[0])} · GRATIS</b>\n"
+        "⏳ <b>¡FALTA 1 HORA PARA LA CARRERA!</b>\n"
+        "━━━━━━━━━━━━━━━━\n"
+        + pick["texto"]
+        + "\n━━━━━━━━━━━━━━━━\n"
+        f"\U0001F525 ¿Quieres TODAS las paradas de hoy? <b>VIP {esc(PRECIO_DIA)}</b>"
+    )
 
 
 def _precio(t):
@@ -975,11 +1046,23 @@ def _cuenta(n, uno, varios):
     return f"{n} {uno if n == 1 else varios}"
 
 
-def promo_vip(menu, valor, precio_dia):
-    """Super promo: resumen de todo lo que trae el VIP hoy (sin ejemplares) + precio del dia + QR."""
+def _bloque_pago():
+    visible = esc(contacto_visible(VIP_LINK)) if VIP_LINK else ""
+    return (f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
+            + (f"\n\U0001F4E9 Comprobante a: {visible}" if visible else ""))
+
+
+def valores_del_menu(menu):
+    """Caballos de valor del dia (sin los free), ordenados por hora de carrera entre todos los hipodromos."""
+    vals = [(h, i) for h in menu["hipodromos"] for i in h["items"]
+            if i["etiqueta"] == "VALOR" and not i.get("free")]
+    return sorted(vals, key=lambda hi: _orden_hora(hi[1]))
+
+
+def promo_vip(menu, precio_valores, precio_dia):
+    """2) Super promo VIP: resumen de todo lo que trae el VIP hoy (sin ejemplares) + totales + QR."""
     dia = menu["dia"] or DIAS[ahora_local().weekday()]
-    lineas, total, especiales = [], 0, 0
-    hay = set()
+    lineas, total, hay = [], 0, set()
     for h in menu["hipodromos"]:
         vip = [i for i in h["items"] if not i.get("free")]
         if not vip:
@@ -987,9 +1070,9 @@ def promo_vip(menu, valor, precio_dia):
         c = {k: sum(1 for i in vip if i["etiqueta"] == k) for k in ("VALOR", "BEST BET", "RATA DEL DÍA", "RATA FUERTE")}
         partes = []
         if c["VALOR"]:
-            partes.append("\U0001F31F " + _cuenta(c["VALOR"], "Especial", "Especiales"))
+            partes.append("\U0001F48E " + _cuenta(c["VALOR"], "Caballo de valor", "Caballos de valor"))
         if c["BEST BET"]:
-            partes.append("\u2B50 " + _cuenta(c["BEST BET"], "Best Bet", "Best Bets"))
+            partes.append("⭐ " + _cuenta(c["BEST BET"], "Best Bet", "Best Bets"))
         if c["RATA DEL DÍA"]:
             partes.append("\U0001F400 " + _cuenta(c["RATA DEL DÍA"], "Rata del día", "Ratas del día"))
         if c["RATA FUERTE"]:
@@ -997,57 +1080,261 @@ def promo_vip(menu, valor, precio_dia):
         lineas.append(f"\U0001F3C7 <b>{esc(h['nombre'].upper())}</b>\n      " + " · ".join(partes))
         total += len(vip)
         hay.update(k for k, v in c.items() if v)
-        especiales += c["VALOR"]
     if not total:
         return None
-    precio_uno = _precio(valor)
-    suelto = ""
-    if especiales and precio_uno:
-        suelto = (f"\U0001F31F Cada ESPECIAL suelto: <b>{esc(valor)}</b>"
-                  + (f" (los {especiales} = ${precio_uno * especiales:.2f})" if especiales > 1 else "") + "\n")
-    visible = esc(contacto_visible(VIP_LINK)) if VIP_LINK else ""
+    n_valores = len(valores_del_menu(menu))
+    incluye = " + ".join(n for k, n in (("VALOR", "caballos de valor"), ("RATA", "ratas"), ("BEST BET", "best bets"))
+                         if any(x.startswith(k) for x in hay))
     return (
         f"\U0001F525<b>SÚPER PROMO CORRIDATV · {dia}</b>\U0001F525\n\n"
         "Entra al <b>VIP</b> y llévate <b>TODAS las paradas de hoy</b> detalladas "
         "(ejemplar, número, ML, jugada y reseña):\n\n"
         + "\n".join(lineas)
         + f"\n\n\U0001F4E6 <b>{_cuenta(total, 'parada', 'paradas')} en total</b>\n\n"
-        + suelto
-        + f"\U0001F381 <b>TODO EL DÍA POR SOLO {esc(precio_dia)}</b>"
-        + (" (" + " + ".join(n for k, n in (("VALOR", "especiales"), ("RATA", "ratas"), ("BEST BET", "best bets"))
-                           if any(x.startswith(k) for x in hay)) + ")" if hay else "")
-        + "\n\n"
-        "\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
-        f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
-        + (f"\n\U0001F4E9 Comprobante a: {visible}" if visible else "")
-        + "\n\n<b>ESTO NO ES CORAZONADA</b> \u2705"
+        + (f"\U0001F48E Solo los {n_valores} caballos de valor: <b>{esc(precio_valores)}</b>\n" if n_valores > 1 else
+           (f"\U0001F48E Solo el caballo de valor: <b>{esc(precio_valores)}</b>\n" if n_valores else ""))
+        + f"\U0001F381 <b>TODO EL DÍA POR SOLO {esc(precio_dia)}</b>" + (f" ({incluye})" if incluye else "")
+        + "\n\n\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
+        + _bloque_pago()
+        + "\n\n<b>ESTO NO ES CORAZONADA</b> ✅"
     )
 
 
-def venta_especiales(menu, valor):
-    """Mensaje de venta de los VALOR DEL DIA (ESPECIAL) con su reseña, sin nombre ni numero."""
-    bloques = []
-    for h in menu["hipodromos"]:
-        for i in sorted(h["items"], key=_orden_hora):
-            if i["etiqueta"] == "VALOR" and not i.get("free"):
-                b = f"\U0001F3C7 <b>{esc(h['nombre'].upper())}</b> · \u23F0 {esc(i['hora'])} · C{esc(i['carrera'])}"
-                if i["resena"]:
-                    b += f"\n\U0001F4DD <i>{esc(i['resena'])}</i>"
-                bloques.append(b)
-    if not bloques:
+def venta_valores(menu, precio_valores):
+    """4) Una sola promocion: todos los caballos de valor (alto dividendo, jugar largo) + QR."""
+    vals = valores_del_menu(menu)
+    if not vals:
         return None
-    contacto = VIP_LINK
-    visible = esc(contacto_visible(contacto)) if contacto else ""
+    n = len(vals)
+    bloques = []
+    for h, i in vals:
+        b = f"\U0001F3C7 <b>{esc(h['nombre'].upper())}</b> · ⏰ {esc(hora_ve(i['hora']))} · C{esc(i['carrera'])}"
+        if i["resena"]:
+            b += f"\n\U0001F4DD <i>{esc(i['resena'])}</i>"
+        bloques.append(b)
     return (
-        f"\U0001F31F<b>ESPECIAL DE HOY ({esc(valor)})</b>\U0001F31F\n\n"
+        f"\U0001F48E\U0001F48E <b>CABALLOS DE VALOR · ALTO DIVIDENDO</b> \U0001F48E\U0001F48E\n\n"
+        f"Hoy tenemos <b>{_cuenta(n, 'ejemplar especial', 'ejemplares especiales')}</b> para "
+        "<b>JUGAR LARGO</b> en las corridas:\n\n"
         + "\n\n".join(bloques)
-        + "\n\n\U0001F449<b>LA PARADA FUERTE DE LA JORNADA!</b>\U0001F525\n"
+        + f"\n\n\U0001F381 <b>{'LOS ' + str(n) if n > 1 else 'EL VALOR'} POR SOLO {esc(precio_valores)}</b> (una sola promoción)\n"
         "\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
-        f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
-        + (f"\n\U0001F4E9 Comprobante a: {visible}" if visible else "")
-        + f"\n\n\U0001F3C3... Paga {esc(valor)} en USDT con el QR (desde Binance u otro exchange), "
-        "manda tu comprobante y recibes el ESPECIAL antes de la carrera."
+        + _bloque_pago()
+        + "\n\n\U0001F3C3... Paga, manda tu comprobante y recibes los ejemplares antes de la primera carrera."
     )
+
+
+def ultimo_llamado_valores(menu, precio_valores, minutos):
+    vals = valores_del_menu(menu)
+    if not vals:
+        return None
+    return (
+        f"⏳⏳ <b>ÚLTIMO LLAMADO</b> ⏳⏳\n\n"
+        f"En <b>{minutos} minutos</b> corre el primer <b>caballo de valor</b> de hoy "
+        f"({esc(vals[0][0]['nombre'])}, C{esc(vals[0][1]['carrera'])}).\n\n"
+        f"\U0001F48E <b>{_cuenta(len(vals), 'ejemplar de alto dividendo', 'ejemplares de alto dividendo')} "
+        f"por {esc(precio_valores)}</b>\n"
+        f"\U0001F381 O todo el día en el VIP por <b>{esc(PRECIO_DIA)}</b>\n\n"
+        + _bloque_pago()
+    )
+
+
+# ==========================================
+# COLA DE MENSAJES PROGRAMADOS (la jornada sale sola)
+# ==========================================
+import threading as _threading
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover
+    _fcntl = None
+
+COLA_PATH = os.path.join(BASE_DIR, "cola.json")
+_cola_lock = _threading.Lock()
+
+
+class _CandadoCola:
+    """Candado entre hilos y entre procesos (varios workers de gunicorn) para no enviar dos veces."""
+    def __enter__(self):
+        _cola_lock.acquire()
+        self.f = open(COLA_PATH + ".lock", "a")
+        if _fcntl:
+            _fcntl.flock(self.f, _fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *a):
+        if _fcntl:
+            _fcntl.flock(self.f, _fcntl.LOCK_UN)
+        self.f.close()
+        _cola_lock.release()
+
+
+def _leer_cola():
+    try:
+        with open(COLA_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def _guardar_cola(cola):
+    tmp = COLA_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cola, f, ensure_ascii=False)
+    os.replace(tmp, COLA_PATH)
+
+
+def encolar(items):
+    """items: dicts con cuando (datetime), destino, texto, titulo, y opcionales foto ('qr'|'rata_del_dia'|'rata_fuerte'),
+    gif (bool), boton ('contacto'|'info')."""
+    with _CandadoCola():
+        cola = _leer_cola()
+        base = max([c["id"] for c in cola] or [0])
+        for n, it in enumerate(items, 1):
+            cola.append({
+                "id": base + n,
+                "cuando": it["cuando"].astimezone(datetime.timezone.utc).isoformat(),
+                "destino": it["destino"], "texto": it["texto"], "titulo": it["titulo"],
+                "foto": it.get("foto"), "gif": bool(it.get("gif")), "boton": it.get("boton"),
+                "estado": "pendiente", "detalle": "",
+            })
+        cola.sort(key=lambda c: c["cuando"])
+        _guardar_cola(cola)
+
+
+def _foto_de(clave):
+    if clave == "qr":
+        return qr_binance()
+    if clave in ("rata_del_dia", "rata_fuerte"):
+        return imagen_etiqueta("RATA FUERTE" if clave == "rata_fuerte" else "RATA"), None
+    return None, None
+
+
+def procesar_cola():
+    """Envia lo que ya toco. Lo llaman el hilo interno (cada 30 s) y /tick (UptimeRobot)."""
+    if config_faltante():
+        return 0
+    enviados = 0
+    ahora = datetime.datetime.now(datetime.timezone.utc)
+    with _CandadoCola():
+        cola = _leer_cola()
+        cambio = False
+        for c in cola:
+            if c["estado"] != "pendiente" or datetime.datetime.fromisoformat(c["cuando"]) > ahora:
+                continue
+            foto, foto_url = _foto_de(c.get("foto"))
+            opciones = {"foto": foto, "foto_url": foto_url}
+            if c.get("gif") and GIF_NUEVO_PRONOSTICO:
+                opciones["animacion"] = GIF_NUEVO_PRONOSTICO
+            if c.get("boton") == "contacto":
+                opciones["reply_markup"] = teclado_contacto()
+            elif c.get("boton") == "info":
+                opciones["reply_markup"] = teclado_contacto(con_comprobante=False)
+            res = despachar_telegram(c["destino"], {c["destino"]: c["texto"]}, **{c["destino"]: opciones})
+            ok = bool(res) and all(r["entregado"] for r in res)
+            c["estado"] = "enviado" if ok else "fallido"
+            c["detalle"] = resumir(res)
+            c["enviado_en"] = ahora.isoformat()
+            cambio = True
+            enviados += 1
+        if cambio:
+            # se guarda solo lo de las ultimas 48 h
+            limite = ahora - datetime.timedelta(hours=48)
+            cola = [c for c in cola if datetime.datetime.fromisoformat(c["cuando"]) > limite or c["estado"] == "pendiente"]
+            _guardar_cola(cola)
+    return enviados
+
+
+def cola_para_panel():
+    hoy = []
+    for c in _leer_cola():
+        dt = a_local(datetime.datetime.fromisoformat(c["cuando"]))
+        hoy.append({"id": c["id"], "hora": dt.strftime("%d/%m %I:%M %p"), "titulo": c["titulo"],
+                    "destino": c["destino"], "estado": c["estado"], "detalle": c.get("detalle", "")})
+    return hoy
+
+
+def _bucle_cola():
+    import time
+    while True:
+        try:
+            procesar_cola()
+        except Exception as exc:  # el hilo nunca debe morir
+            print(f"[cola] error: {exc!r}", flush=True)
+        time.sleep(30)
+
+
+_hilo_cola = None
+
+
+def arrancar_hilo_cola():
+    global _hilo_cola
+    if _hilo_cola is None or not _hilo_cola.is_alive():
+        _hilo_cola = _threading.Thread(target=_bucle_cola, daemon=True, name="cola-corridatv")
+        _hilo_cola.start()
+
+
+def planificar_jornada(menu, nota, opciones):
+    """Arma la jornada completa: menu ya, promo VIP, free 1 h antes, venta de valores y ultimo llamado."""
+    ahora = datetime.datetime.now(datetime.timezone.utc)
+    prueba = opciones.get("prueba")
+    paso = datetime.timedelta(seconds=20)
+    items = []
+
+    def cuando(dt):
+        # en prueba todo sale ya, en orden, separado 20 s
+        if prueba:
+            return ahora + paso * len(items)
+        return max(dt, ahora)
+
+    picks = picks_menu(menu)
+    if opciones.get("menu"):
+        items.append({"cuando": cuando(ahora), "destino": "gratis", "titulo": "1) Menú del día",
+                      "texto": menu_publico(menu, nota, ahora_local(), VALOR_ESPECIAL), "boton": "info"})
+    promo = promo_vip(menu, PRECIO_VALORES, PRECIO_DIA) if opciones.get("promo") else None
+    if promo:
+        items.append({"cuando": cuando(ahora + datetime.timedelta(minutes=opciones.get("min_promo", 15))),
+                      "destino": "gratis", "titulo": f"2) Súper promo VIP {PRECIO_DIA}", "texto": promo,
+                      "foto": "qr", "boton": "contacto"})
+    # VIP: todos los picks completos (los compradores ya los tienen)
+    for n, p in enumerate(picks):
+        if p["destino"] == "vip" and n in opciones.get("vip", []):
+            foto = None
+            if es_rata(p["etiqueta"]):
+                foto = "rata_fuerte" if "FUERTE" in p["etiqueta"].upper() else "rata_del_dia"
+            items.append({"cuando": cuando(ahora), "destino": "vip", "titulo": f"VIP · {p['titulo']}",
+                          "texto": p["texto"], "foto": foto})
+    # Free: 1 hora antes de su carrera, con alerta
+    for n, p in enumerate(picks):
+        if p["destino"] != "gratis" or n not in opciones.get("free", []):
+            continue
+        carrera = momento_carrera(p["item"]["hora"])
+        if carrera is None:
+            continue
+        envio = carrera - datetime.timedelta(minutes=opciones.get("min_free", 60))
+        if not prueba and carrera <= ahora:
+            continue  # la carrera ya paso
+        foto = None
+        if es_rata(p["etiqueta"]):
+            foto = "rata_fuerte" if "FUERTE" in p["etiqueta"].upper() else "rata_del_dia"
+        items.append({"cuando": cuando(envio), "destino": "gratis", "titulo": f"3) Alerta · {p['titulo']}",
+                      "texto": alerta_free(p), "foto": foto, "gif": True, "boton": "info"})
+    # Valores: una sola promo antes del primer valor + ultimo llamado
+    vals = valores_del_menu(menu)
+    if vals and opciones.get("valores"):
+        primera = momento_carrera(vals[0][1]["hora"])
+        if primera and (prueba or primera > ahora):
+            items.append({"cuando": cuando(primera - datetime.timedelta(minutes=opciones.get("min_valores", 120))),
+                          "destino": "gratis", "titulo": f"4) Caballos de valor {PRECIO_VALORES}",
+                          "texto": venta_valores(menu, PRECIO_VALORES), "foto": "qr", "boton": "contacto"})
+            ml = opciones.get("min_ultimo", 30)
+            items.append({"cuando": cuando(primera - datetime.timedelta(minutes=ml)),
+                          "destino": "gratis", "titulo": "5) Último llamado caballos de valor",
+                          "texto": ultimo_llamado_valores(menu, PRECIO_VALORES, ml), "foto": "qr", "boton": "contacto"})
+    items.sort(key=lambda x: x["cuando"])
+    if prueba:  # reordenar con 20 s entre cada uno respetando el orden logico
+        for k, it in enumerate(items):
+            it["cuando"] = ahora + paso * k
+    return items
 
 
 def html_a_texto(t):
@@ -1274,6 +1561,8 @@ def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200, *
         vista=extra.get("vista"),
         menu_texto=extra.get("menu_texto", ""),
         menu_nota=extra.get("menu_nota", NOTA_HORARIOS),
+        cola=cola_para_panel(),
+        programado=extra.get("programado", ""),
     ), status
 
 
@@ -1352,6 +1641,11 @@ def leer_foto(errores, obligatoria=False):
 # ==========================================
 # RUTAS
 # ==========================================
+@app.before_request
+def _asegurar_hilo():
+    arrancar_hilo_cola()
+
+
 @app.route("/", methods=["GET"])
 def inicio():
     if not auth_ok():
@@ -1386,27 +1680,40 @@ def vista_menu():
         return render_panel(detalle="No se encontró ningún hipódromo (🏇) con picks en el menú pegado.",
                             menu_texto=texto, menu_nota=nota, status=422)
     picks = picks_menu(menu)
-    venta = venta_especiales(menu, VALOR_ESPECIAL)
+    gratis = []
+    for n, p in enumerate(picks):
+        if p["destino"] == "gratis":
+            c = momento_carrera(p["item"]["hora"])
+            sale = a_local(c - datetime.timedelta(minutes=60)).strftime("%I:%M %p").lstrip("0") if c else "?"
+            gratis.append((n, p["titulo"], f"{sale} si es para hoy"))
     vista = {
         "publico": html_a_texto(menu_publico(menu, nota, ahora_local(), VALOR_ESPECIAL)),
-        "venta": html_a_texto(venta) if venta else "",
-        "promo": html_a_texto(promo_vip(menu, VALOR_ESPECIAL, PRECIO_DIA) or ""),
+        "promo": html_a_texto(promo_vip(menu, PRECIO_VALORES, PRECIO_DIA) or ""),
+        "valores": html_a_texto(venta_valores(menu, PRECIO_VALORES) or ""),
         "precio_dia": PRECIO_DIA,
-        "gratis": [(n, p["titulo"]) for n, p in enumerate(picks) if p["destino"] == "gratis"],
+        "precio_valores": PRECIO_VALORES,
+        "gratis": gratis,
         "vip": [(n, p["titulo"]) for n, p in enumerate(picks) if p["destino"] == "vip"],
     }
     return render_panel(vista=vista, menu_texto=texto, menu_nota=nota)
 
 
+def _entero(valor, defecto):
+    try:
+        return max(0, int(str(valor).strip()))
+    except (TypeError, ValueError):
+        return defecto
+
+
 @app.route("/webhook-menu", methods=["POST"])
 def publicar_menu():
-    """Publica el menu publico (gratis) y los picks marcados (VIP). JSON: {"menu": "...", "picks": "todos"}."""
+    """Programa la jornada. JSON: {"menu": "...", "prueba": false} (todo marcado por defecto)."""
     error = chequeo_previo()
     if error:
         return error
     quiere_json, datos = leer_datos()
     texto = campo(datos, "menu")
-    nota = datos.get("nota", NOTA_HORARIOS) if quiere_json else request.form.get("nota", NOTA_HORARIOS)
+    nota = (datos.get("nota", NOTA_HORARIOS) if quiere_json else request.form.get("nota", NOTA_HORARIOS))
     menu = parsear_menu(texto)
     if not menu["hipodromos"]:
         return responder_error(quiere_json, ["no se encontró ningún hipódromo con picks en el menú"])
@@ -1417,53 +1724,54 @@ def publicar_menu():
 
     picks = picks_menu(menu)
     if quiere_json:
-        pub_menu = bool(datos.get("pub_menu", True))
-        pub_venta = bool(datos.get("pub_venta", True))
-        pub_promo = bool(datos.get("pub_promo", True))
-        sel = datos.get("picks", "todos")
-        elegidos = range(len(picks)) if sel == "todos" else [int(x) for x in (sel or [])]
+        todos = list(range(len(picks)))
+        opciones = {"menu": datos.get("pub_menu", True), "promo": datos.get("pub_promo", True),
+                    "valores": datos.get("pub_valores", True), "prueba": bool(datos.get("prueba")),
+                    "free": todos, "vip": todos}
     else:
-        pub_menu = marcado(datos, "pub_menu")
-        pub_venta = marcado(datos, "pub_venta")
-        pub_promo = marcado(datos, "pub_promo")
-        elegidos = [int(x) for x in request.form.getlist("pick") if x.isdigit()]
+        lista = lambda k: [int(x) for x in request.form.getlist(k) if x.isdigit()]
+        opciones = {"menu": marcado(datos, "pub_menu"), "promo": marcado(datos, "pub_promo"),
+                    "valores": marcado(datos, "pub_valores"), "prueba": marcado(datos, "prueba"),
+                    "free": lista("free"), "vip": lista("vip")}
+    opciones.update(min_promo=_entero(datos.get("min_promo"), 15), min_free=_entero(datos.get("min_free"), 60),
+                    min_valores=_entero(datos.get("min_valores"), 120), min_ultimo=_entero(datos.get("min_ultimo"), 30))
 
-    resultados = []
-    if pub_menu:
-        publico = menu_publico(menu, nota, ahora_local(), VALOR_ESPECIAL)
-        opciones = {"reply_markup": teclado_contacto(con_comprobante=False)}
-        for r in despachar_telegram("gratis", {"gratis": publico}, gratis=opciones):
-            r["grupo"] = "menu gratis"
-            resultados.append(r)
-    venta = venta_especiales(menu, VALOR_ESPECIAL) if pub_venta else None
-    if venta:
-        foto, foto_url = qr_binance()
-        opciones = {"reply_markup": teclado_contacto(), "foto": foto, "foto_url": foto_url}
-        for r in despachar_telegram("gratis", {"gratis": venta}, gratis=opciones):
-            r["grupo"] = "venta ESPECIAL gratis"
-            resultados.append(r)
-    promo = promo_vip(menu, VALOR_ESPECIAL, PRECIO_DIA) if pub_promo else None
-    if promo:
-        foto, foto_url = qr_binance()
-        opciones = {"reply_markup": teclado_contacto(), "foto": foto, "foto_url": foto_url}
-        for r in despachar_telegram("gratis", {"gratis": promo}, gratis=opciones):
-            r["grupo"] = "super promo VIP gratis"
-            resultados.append(r)
-    fecha = ahora_local().strftime("%Y-%m-%d %H:%M")
-    for idx in elegidos:
-        if not 0 <= idx < len(picks):
-            continue
-        p = picks[idx]
-        imagen = imagen_etiqueta(p["etiqueta"])
-        destino = p["destino"]
-        opciones = {"foto": imagen} if imagen else {}
-        for r in despachar_telegram(destino, {destino: p["texto"]}, **{destino: opciones}):
-            r["grupo"] = f"{'GRATIS' if destino == 'gratis' else 'VIP'} {p['etiqueta']}"
-            resultados.append(r)
-            guardar_en_registro(fecha, p["titulo"], p["etiqueta"], "", "", destino, [r])
-    if not resultados:
-        return responder_error(quiere_json, ["no marcaste nada para publicar"])
-    return responder_envio(quiere_json, resultados, {"picks_enviados": len([i for i in elegidos if 0 <= i < len(picks)])})
+    items = planificar_jornada(menu, nota, opciones)
+    if not items:
+        return responder_error(quiere_json, ["no hay nada que programar (¿las carreras ya pasaron? usa MODO PRUEBA)"])
+    encolar(items)
+    arrancar_hilo_cola()
+    procesar_cola()  # lo que toca ya (menu, VIP) sale en este momento
+
+    resumen = [f"{a_local(it['cuando']).strftime('%I:%M %p').lstrip('0')} · {it['titulo'][:60]}" for it in items]
+    if quiere_json:
+        return jsonify({"ok": True, "programados": len(items), "plan": resumen}), 200
+    return render_panel(programado=f"Jornada programada: {len(items)} mensajes. Abajo ves la hora de cada uno "
+                                   "y si ya salió (✅) o falló (❌).")
+
+
+@app.route("/tick", methods=["GET", "POST"])
+def tick():
+    """Para UptimeRobot / cron-job.org cada 5 min: mantiene despierto el servicio y envia lo pendiente."""
+    arrancar_hilo_cola()
+    n = procesar_cola()
+    pendientes = sum(1 for c in _leer_cola() if c["estado"] == "pendiente")
+    return jsonify({"ok": True, "enviados_ahora": n, "pendientes": pendientes}), 200
+
+
+@app.route("/cola-cancelar", methods=["POST"])
+def cancelar_cola():
+    if not auth_ok():
+        return respuesta_no_autorizado()
+    with _CandadoCola():
+        cola = _leer_cola()
+        n = 0
+        for c in cola:
+            if c["estado"] == "pendiente":
+                c["estado"] = "cancelado"
+                n += 1
+        _guardar_cola(cola)
+    return render_panel(programado=f"Cancelados {n} mensajes pendientes.")
 
 
 @app.route("/webhook-programacion", methods=["POST"])
