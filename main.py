@@ -132,7 +132,7 @@ ETIQUETAS = [
     {"nombre": "PARADA FREE 1", "destino": "gratis", "emoji": "🎁"},
     {"nombre": "PARADA FREE 2", "destino": "gratis", "emoji": "🎁"},
     {"nombre": "ESPECIAL", "destino": "vip", "emoji": "🌟"},
-    {"nombre": "CABALLO DE VALOR", "destino": "vip", "emoji": "💎"},
+    {"nombre": "ESPECIAL ALTO DIVIDENDO", "destino": "vip", "emoji": "💎💰"},
     {"nombre": "STAKAZO 15", "destino": "vip", "emoji": "💎"},
     {"nombre": "RATAS DEL DÍA", "destino": "vip", "emoji": "🐀"},
     {"nombre": "RATA FUERTE", "destino": "vip", "emoji": "🐀🔥"},
@@ -340,7 +340,7 @@ PAGINA_INICIO = """
                     {% endfor %}
                     {% if not vista.gratis %}<div class="ayuda">Ningún pick marcado como "parada free 1/2" en el menú.</div>{% endif %}
                     {% if vista.valores %}
-                    <label class="check"><input type="checkbox" name="pub_valores" value="1" checked>4) Caballos de valor {{ vista.precio_valores }} · <input type="number" name="min_valores" value="120" style="width:70px;display:inline-block;margin:0 6px"> min antes del primero, y último llamado a los <input type="number" name="min_ultimo" value="30" style="width:60px;display:inline-block;margin:0 6px"> min</label>
+                    <label class="check"><input type="checkbox" name="pub_valores" value="1" checked>4) Especiales ALTO DIVIDENDO {{ vista.precio_valores }} · <input type="number" name="min_valores" value="120" style="width:70px;display:inline-block;margin:0 6px"> min antes del primero, y último llamado a los <input type="number" name="min_ultimo" value="30" style="width:60px;display:inline-block;margin:0 6px"> min</label>
                     <pre style="white-space:pre-wrap;background:#1e293b;padding:10px;border-radius:6px;font-size:12px">{{ vista.valores }}</pre>
                     {% endif %}
 
@@ -997,7 +997,7 @@ def hora_ve(hora_txt):
 def menu_publico(menu, nota, fecha, valor):
     """1) Menu para el grupo gratis: etiquetas y horas SIN nombre ni numero del ejemplar."""
     dia = menu["dia"] or DIAS[fecha.weekday()]
-    nombres = {"BEST BET": "⭐ BEST BET", "VALOR": "\U0001F48E CABALLO DE VALOR",
+    nombres = {"BEST BET": "⭐ BEST BET", "VALOR": "\U0001F48E\U0001F4B0 ESPECIAL ALTO DIVIDENDO",
                "RATA DEL DÍA": "\U0001F400 RATA DEL DÍA", "RATA FUERTE": "\U0001F400\U0001F525 RATA FUERTE"}
     bloques = []
     for h in menu["hipodromos"]:
@@ -1021,7 +1021,7 @@ def picks_menu(menu):
     for h in menu["hipodromos"]:
         for i in sorted(h["items"], key=_orden_hora):
             if i["etiqueta"] == "VALOR":
-                etq = "CABALLO DE VALOR"
+                etq = "ESPECIAL ALTO DIVIDENDO"
             elif i["etiqueta"] == "BEST BET":
                 etq = f"BEST BET {h['nombre'].upper()}"
             else:
@@ -1092,7 +1092,7 @@ def promo_vip(menu, precio_valores, precio_dia):
         c = {k: sum(1 for i in vip if i["etiqueta"] == k) for k in ("VALOR", "BEST BET", "RATA DEL DÍA", "RATA FUERTE")}
         partes = []
         if c["VALOR"]:
-            partes.append("\U0001F48E " + _cuenta(c["VALOR"], "Caballo de valor", "Caballos de valor"))
+            partes.append("\U0001F48E " + _cuenta(c["VALOR"], "Especial ALTO DIVIDENDO", "Especiales ALTO DIVIDENDO"))
         if c["BEST BET"]:
             partes.append("⭐ " + _cuenta(c["BEST BET"], "Best Bet", "Best Bets"))
         if c["RATA DEL DÍA"]:
@@ -1105,7 +1105,7 @@ def promo_vip(menu, precio_valores, precio_dia):
     if not total:
         return None
     n_valores = len(valores_del_menu(menu))
-    incluye = " + ".join(n for k, n in (("VALOR", "caballos de valor"), ("RATA", "ratas"), ("BEST BET", "best bets"))
+    incluye = " + ".join(n for k, n in (("VALOR", "especiales de alto dividendo"), ("RATA", "ratas"), ("BEST BET", "best bets"))
                          if any(x.startswith(k) for x in hay))
     return (
         f"\U0001F525<b>SÚPER PROMO CORRIDATV · {dia}</b>\U0001F525\n\n"
@@ -1113,8 +1113,9 @@ def promo_vip(menu, precio_valores, precio_dia):
         "(ejemplar, número, ML, jugada y reseña):\n\n"
         + "\n".join(lineas)
         + f"\n\n\U0001F4E6 <b>{_cuenta(total, 'parada', 'paradas')} en total</b>\n\n"
-        + (f"\U0001F48E Solo los {n_valores} caballos de valor: <b>{esc(precio_valores)}</b>\n" if n_valores > 1 else
-           (f"\U0001F48E Solo el caballo de valor: <b>{esc(precio_valores)}</b>\n" if n_valores else ""))
+        + (f"\U0001F48E\U0001F4B0 <b>Solo los {n_valores} ESPECIALES DE ALTO DIVIDENDO: {esc(precio_valores)}</b>\n"
+           "      (pagan mucho a ganador y a place)\n" if n_valores > 1 else
+           (f"\U0001F48E\U0001F4B0 <b>Solo el ESPECIAL DE ALTO DIVIDENDO: {esc(precio_valores)}</b>\n" if n_valores else ""))
         + f"\U0001F381 <b>TODO EL DÍA POR SOLO {esc(precio_dia)}</b>" + (f" ({incluye})" if incluye else "")
         + "\n\n\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
         + _bloque_pago()
@@ -1134,16 +1135,44 @@ def venta_valores(menu, precio_valores):
         if i["resena"]:
             b += f"\n\U0001F4DD <i>{esc(i['resena'])}</i>"
         bloques.append(b)
+    mls = [_precio_ml(i["ml"]) for _, i in vals]
+    mls = [m for m in mls if m]
+    rango = ""
+    if mls:
+        lo, hi = min(mls), max(mls)
+        rango = (f"\U0001F4C8 Cuotas de <b>{_fmt_ml(lo)}</b> hasta <b>{_fmt_ml(hi)}</b>\n" if lo != hi
+                 else f"\U0001F4C8 Cuota de <b>{_fmt_ml(lo)}</b>\n")
     return (
-        f"\U0001F48E\U0001F48E <b>CABALLOS DE VALOR · ALTO DIVIDENDO</b> \U0001F48E\U0001F48E\n\n"
-        f"Hoy tenemos <b>{_cuenta(n, 'ejemplar especial', 'ejemplares especiales')}</b> para "
-        "<b>JUGAR LARGO</b> en las corridas:\n\n"
+        "\U0001F48E\U0001F4B0\U0001F48E\U0001F4B0\U0001F48E\n"
+        "<b>ESPECIALES DE ALTO DIVIDENDO</b>\n"
+        "\U0001F48E\U0001F4B0\U0001F48E\U0001F4B0\U0001F48E\n\n"
+        f"Hoy tenemos <b>{_cuenta(n, 'ejemplar especial', 'ejemplares especiales')}</b> que "
+        "<b>PAGAN MUCHO a GANADOR y a PLACE</b> \U0001F4B5\U0001F4B5\n"
+        "\U0001F3AF Para <b>JUGAR LARGO</b>: a 5 puesto o a ganar\n"
+        + rango + "\n"
         + "\n\n".join(bloques)
-        + f"\n\n\U0001F381 <b>{'LOS ' + str(n) if n > 1 else 'EL VALOR'} POR SOLO {esc(precio_valores)}</b> (una sola promoción)\n"
+        + f"\n\n\U0001F381 <b>{'LOS ' + str(n) if n > 1 else 'EL ESPECIAL'} POR SOLO {esc(precio_valores)}</b> (una sola promoción)\n"
         "\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
         + _bloque_pago()
         + "\n\n\U0001F3C3... Paga, manda tu comprobante y recibes los ejemplares antes de la primera carrera."
     )
+
+
+def _precio_ml(ml):
+    """'6/1' -> 6.0, '5-2' -> 2.5 (para mostrar el rango de cuotas sin revelar el ejemplar)."""
+    t = (ml or "").replace(" ", "")
+    for sep in ("-", "/", ":"):
+        if sep in t:
+            try:
+                a, b = t.split(sep)[:2]
+                return float(a) / float(b)
+            except (ValueError, ZeroDivisionError):
+                return None
+    return None
+
+
+def _fmt_ml(x):
+    return f"{x:g}/1" if float(x).is_integer() else f"{x:.1f}/1"
 
 
 def ultimo_llamado_valores(menu, precio_valores, minutos):
@@ -1152,10 +1181,10 @@ def ultimo_llamado_valores(menu, precio_valores, minutos):
         return None
     return (
         f"⏳⏳ <b>ÚLTIMO LLAMADO</b> ⏳⏳\n\n"
-        f"En <b>{minutos} minutos</b> corre el primer <b>caballo de valor</b> de hoy "
+        f"En <b>{minutos} minutos</b> corre el primer <b>ESPECIAL DE ALTO DIVIDENDO</b> de hoy "
         f"({esc(vals[0][0]['nombre'])}, C{esc(vals[0][1]['carrera'])}).\n\n"
-        f"\U0001F48E <b>{_cuenta(len(vals), 'ejemplar de alto dividendo', 'ejemplares de alto dividendo')} "
-        f"por {esc(precio_valores)}</b>\n"
+        f"\U0001F48E\U0001F4B0 <b>{_cuenta(len(vals), 'ejemplar que paga mucho', 'ejemplares que pagan mucho')} "
+        f"a ganador y place por {esc(precio_valores)}</b>\n"
         f"\U0001F381 O todo el día en el VIP por <b>{esc(PRECIO_DIA)}</b>\n\n"
         + _bloque_pago()
     )
@@ -1214,7 +1243,10 @@ def festejo(p, pago="", cta=True):
                   "El favorito vulnerable <b>LO MARCAMOS EN ROJO</b> \U0001F534 y no pudo ganar, tal como lo avisamos.")
     else:
         jugada = p["item"].get("tipo") or ""
-        cuerpo = (f"\U0001F525\U0001F525 <b>¡ES VERDEEEEE!</b> \U0001F525\U0001F525\n\n"
+        grito = ("\U0001F4B0\U0001F4B0 <b>¡ALTO DIVIDENDO DENTROOOO!</b> \U0001F4B0\U0001F4B0"
+                 if "ALTO DIVIDENDO" in p["etiqueta"] else
+                 "\U0001F525\U0001F525 <b>¡ES VERDEEEEE!</b> \U0001F525\U0001F525")
+        cuerpo = (f"{grito}\n\n"
                   f"{_ejemplar(p)}"
                   + (f"\n\U0001F3AF {esc(jugada)}" if jugada else "")
                   + f"\n\n<i>{'¡Y te la regalamos GRATIS!' if free else 'Otra parada que nos entra.'} "
@@ -1432,11 +1464,11 @@ def planificar_jornada(menu, nota, opciones):
         primera = momento_carrera(vals[0][1]["hora"])
         if primera and (prueba or primera > ahora):
             items.append({"cuando": cuando(primera - datetime.timedelta(minutes=opciones.get("min_valores", 120))),
-                          "destino": "gratis", "titulo": f"4) Caballos de valor {PRECIO_VALORES}",
+                          "destino": "gratis", "titulo": f"4) Especiales ALTO DIVIDENDO {PRECIO_VALORES}",
                           "texto": venta_valores(menu, PRECIO_VALORES), "foto": "qr", "boton": "contacto"})
             ml = opciones.get("min_ultimo", 30)
             items.append({"cuando": cuando(primera - datetime.timedelta(minutes=ml)),
-                          "destino": "gratis", "titulo": "5) Último llamado caballos de valor",
+                          "destino": "gratis", "titulo": "5) Último llamado especiales ALTO DIVIDENDO",
                           "texto": ultimo_llamado_valores(menu, PRECIO_VALORES, ml), "foto": "qr", "boton": "contacto"})
     items.sort(key=lambda x: x["cuando"])
     if prueba:  # reordenar con 20 s entre cada uno respetando el orden logico
