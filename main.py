@@ -75,6 +75,8 @@ BINANCE_QR = _env("BINANCE_QR")
 BINANCE_PAY_ID = _env("BINANCE_PAY_ID")     # opcional: se muestra junto al QR
 # Deposito de USDT (el QR de binance_qr.png apunta a esta direccion)
 USDT_RED = _env("USDT_RED") or "BSC (BEP20)"
+# Precio del ESPECIAL (sale entre parentesis en el menu y en la venta)
+VALOR_ESPECIAL = _env("VALOR_ESPECIAL") or "$4.99"
 USDT_DIRECCION = _env("USDT_DIRECCION") or "0x45d608619ea45555d3c458fb178113f7d96c109a"
 BONO_TEXTO = _env("BONO_TEXTO") or "Bono de bienvenida AQUÍ"
 ZONA_HORARIA = _env("ZONA_HORARIA") or "America/Caracas"
@@ -300,7 +302,7 @@ PAGINA_INICIO = """
             <summary>&#9728;&#65039; 1. Programación del día (mañana)</summary>
             <form action="/webhook-programacion" method="POST">
                 <label>Valor del día del ESPECIAL:</label>
-                <input type="text" name="valor" placeholder="Ej: $10 (sale como ESPECIAL ($10))">
+                <input type="text" name="valor" value="{{ valor_especial }}" placeholder="Ej: $4.99">
                 <label>Etiquetas y horas (una por línea: ETIQUETA | HORA). Borra las que no haya hoy:</label>
                 <textarea name="lineas" rows="8">{{ programacion_defecto }}</textarea>
                 <label>Nota de horarios:</label>
@@ -429,7 +431,7 @@ PAGINA_INICIO = """
                 </select>
                 <div class="fila">
                     <div><label>Oferta:</label><input type="text" name="oferta" placeholder="Ej: ESPECIAL ($10)"></div>
-                    <div><label>Monto / valor del ESPECIAL:</label><input type="text" name="monto" placeholder="Ej: $10"></div>
+                    <div><label>Monto (NOS JUGAMOS) o valor del ESPECIAL (vacío = {{ valor_especial }}):</label><input type="text" name="monto" placeholder="Ej: $500"></div>
                 </div>
                 <label>Contacto para el comprobante (vacío = {{ vip_link }}):</label>
                 <input type="text" name="contacto" placeholder="{{ vip_link or '@tuusuario' }}">
@@ -772,6 +774,8 @@ def mensaje_verde(etiqueta, texto, detalle_caballo, pago=""):
 def mensaje_venta(clave, oferta, monto, contacto, texto_libre):
     """Devuelve (texto, url_del_boton). El pago es por QR de Binance; el contacto recibe el comprobante."""
     contacto = contacto or VIP_LINK
+    if clave == "especial" and not monto:
+        monto = VALOR_ESPECIAL
     url = url_publica(contacto)
     visible = esc(contacto_visible(contacto))
     linea_contacto = f" a {visible}" if contacto else ""
@@ -957,6 +961,7 @@ def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200):
         canal=CANAL_NOMBRE,
         vip_link=url_publica(VIP_LINK),
         descripcion=texto_descripcion(),
+        valor_especial=VALOR_ESPECIAL,
         etiquetas=ETIQUETAS,
         tipos=TIPOS_APUESTA,
         plantillas=PLANTILLAS_VENTA,
@@ -1081,7 +1086,7 @@ def recibir_programacion():
     if errores:
         return responder_error(quiere_json, errores)
 
-    texto = mensaje_programacion(lineas, nota, ahora_local(), campo(datos, "valor"))
+    texto = mensaje_programacion(lineas, nota, ahora_local(), campo(datos, "valor") or VALOR_ESPECIAL)
     if marcado(datos, "con_banner") and IMG_MENU_DEL_DIA:
         # el banner va primero como mensaje aparte (igual que el canal modelo)
         for grupo, chat in (("gratis", CHAT_ID_GRATIS), ("vip", CHAT_ID_VIP)):
