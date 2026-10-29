@@ -572,6 +572,30 @@ PAGINA_INICIO = """
             </form>
         </details>
 
+        <!-- 7. COBROS -->
+        <details>
+            <summary>&#128176; 7. Cobros y accesos al VIP</summary>
+            <div class="ayuda" style="margin-top:10px;line-height:1.6">
+                Bot: {% if bot.usuario %}<b>@{{ bot.usuario }}</b>{% else %}?{% endif %} ·
+                Cobros: {% if bot.webhook %}<b style="color:#4ade80">ACTIVOS</b>{% else %}<b style="color:#f87171">apagados</b>{% endif %} ·
+                Admin: {% if admin_ok %}<b style="color:#4ade80">configurado</b>{% else %}<b style="color:#f87171">falta ADMIN_CHAT_ID</b>{% endif %}<br>
+                1) El bot debe ser <b>administrador del VIP</b> con permiso para <b>invitar</b> y <b>expulsar</b>.<br>
+                2) Pulsa "Activar cobros". 3) Escríbele <b>/miid</b> al bot y pon ese número en Render como <b>ADMIN_CHAT_ID</b>.
+            </div>
+            <form action="/bot-conectar" method="POST">
+                <button type="submit" class="b-azul">&#128176; Activar cobros por el bot</button>
+            </form>
+            {% if accesos %}
+            <label>Últimos accesos:</label>
+            {% for a in accesos %}
+            <div class="ayuda" style="padding:3px 0;border-bottom:1px solid #334155">
+                {% if a.estado in ('activo','entregado') %}&#9989;{% elif a.estado == 'pendiente' %}&#9203;{% else %}&#9940;{% endif %}
+                <b>{{ a.nombre }}</b> · {{ a.detalle }} · {{ a.estado }}
+            </div>
+            {% endfor %}
+            {% endif %}
+        </details>
+
         <!-- 6. CANAL -->
         <details>
             <summary>&#9881;&#65039; 6. Descripción del canal</summary>
@@ -658,7 +682,7 @@ def url_publica(link):
 
 def teclado_contacto(con_comprobante=True):
     """Botones: comprobante de pago + informacion/reclamos/afiliacion (uno solo si es el mismo link)."""
-    url_pago = url_publica(VIP_LINK)
+    url_pago = url_publica(contacto_pago())
     url_info = url_publica(CONTACTO_INFO)
     filas = []
     if con_comprobante and url_pago and url_pago == url_info:
@@ -1072,7 +1096,7 @@ def _cuenta(n, uno, varios):
 
 
 def _bloque_pago():
-    visible = esc(contacto_visible(VIP_LINK)) if VIP_LINK else ""
+    visible = esc(contacto_visible(contacto_pago()))
     return (f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
             + (f"\n\U0001F4E9 Comprobante a: {visible}" if visible else ""))
 
@@ -1396,6 +1420,7 @@ def _bucle_cola():
     while True:
         try:
             procesar_cola()
+            procesar_accesos()
         except Exception as exc:  # el hilo nunca debe morir
             print(f"[cola] error: {exc!r}", flush=True)
         time.sleep(30)
@@ -1499,7 +1524,7 @@ def mensaje_verde(etiqueta, texto, detalle_caballo, pago=""):
 
 def mensaje_venta(clave, oferta, monto, contacto, texto_libre, resena=""):
     """Devuelve (texto, url_del_boton). El pago es por QR de Binance; el contacto recibe el comprobante."""
-    contacto = contacto or VIP_LINK
+    contacto = contacto or contacto_pago()
     if clave == "especial" and not monto:
         monto = VALOR_ESPECIAL
     url = url_publica(contacto)
@@ -1558,7 +1583,7 @@ def llamar_telegram(metodo, datos, archivos=None):
             resultado = cuerpo.get("result")
             message_id = resultado.get("message_id") if isinstance(resultado, dict) else None
             return {"entregado": True, "message_id": message_id,
-                    "intentos": intentos_hechos, "error": None}
+                    "intentos": intentos_hechos, "error": None, "resultado": resultado}
 
         codigo = cuerpo.get("error_code", resp.status_code)
         ultimo_error = f"HTTP {resp.status_code} · error_code {codigo} · {cuerpo.get('description', 'sin descripcion')}"
@@ -1709,6 +1734,9 @@ def render_panel(entregado_todo=False, detalle="", faltantes=None, status=200, *
         cola=cola_para_panel(),
         programado=extra.get("programado", ""),
         resultados_picks=_picks_jornada(),
+        bot=estado_bot() if TELEGRAM_TOKEN else {"usuario": None, "webhook": False},
+        admin_ok=bool(ADMIN_CHAT_ID),
+        accesos=accesos_para_panel(),
     ), status
 
 
@@ -1887,6 +1915,7 @@ def publicar_menu():
         return responder_error(quiere_json, ["no hay nada que programar (¿las carreras ya pasaron? usa MODO PRUEBA)"])
     encolar(items)
     guardar_jornada(texto, nota)
+    entregar_especiales_pendientes()
     arrancar_hilo_cola()
     procesar_cola()  # lo que toca ya (menu, VIP) sale en este momento
 
@@ -1895,6 +1924,354 @@ def publicar_menu():
         return jsonify({"ok": True, "programados": len(items), "plan": resumen}), 200
     return render_panel(programado=f"Jornada programada: {len(items)} mensajes. Abajo ves la hora de cada uno "
                                    "y si ya salió (✅) o falló (❌).")
+
+
+# ==========================================
+# COBROS POR EL BOT Y ACCESOS AL VIP
+# ==========================================
+import hashlib as _hashlib
+import time as _time
+
+ADMIN_CHAT_ID = _env("ADMIN_CHAT_ID")              # tu ID personal de Telegram (el bot te lo dice con /miid)
+HORA_AVISO_RENOVAR = _env("HORA_AVISO_RENOVAR") or "21:00"   # aviso de renovacion la noche anterior al vencimiento
+HORA_VENCE = _env("HORA_VENCE") or "05:00"          # a esta hora (Venezuela) sale del VIP quien no renovo
+ACCESOS_PATH = os.path.join(BASE_DIR, "accesos.json")
+_cache_bot = {"t": 0, "usuario": None, "webhook": False}
+
+
+def _secreto_tg():
+    return _hashlib.sha256(("tg-" + WEBHOOK_SECRET).encode()).hexdigest()[:48]
+
+
+def _api_get(metodo):
+    try:
+        r = requests.get(TELEGRAM_API.format(token=TELEGRAM_TOKEN, metodo=metodo), timeout=10)
+        j = r.json()
+        return j.get("result") if j.get("ok") else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def estado_bot(forzar=False):
+    """Usuario del bot y si los cobros (webhook) estan activos. Se consulta como mucho cada 10 min."""
+    if TELEGRAM_TOKEN and (forzar or _time.time() - _cache_bot["t"] > 600):
+        me = _api_get("getMe") or {}
+        info = _api_get("getWebhookInfo") or {}
+        _cache_bot.update(t=_time.time(), usuario=me.get("username"),
+                          webhook=str(info.get("url", "")).endswith("/tg-webhook"))
+    return _cache_bot
+
+
+def contacto_pago():
+    """A donde se manda el comprobante: VIP_LINK si lo configuraste; si no, el chat privado del bot."""
+    if _env("VIP_LINK"):
+        return _env("VIP_LINK")
+    est = estado_bot()
+    if est["webhook"] and est["usuario"]:
+        return "@" + est["usuario"]
+    return CONTACTO_INFO
+
+
+def _leer_accesos():
+    try:
+        with open(ACCESOS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
+
+
+def _guardar_accesos(lista):
+    tmp = ACCESOS_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(lista, f, ensure_ascii=False)
+    os.replace(tmp, ACCESOS_PATH)
+
+
+def _hora(hhmm):
+    try:
+        h, m = hhmm.split(":")
+        return datetime.time(int(h), int(m))
+    except ValueError:
+        return datetime.time(5, 0)
+
+
+def calcular_vencimiento(ahora_loc=None):
+    """Acceso de 1 dia: vence a HORA_VENCE del dia siguiente (si paga de noche, del subsiguiente)."""
+    ahora_loc = ahora_loc or ahora_local()
+    dias = 2 if ahora_loc.hour >= 20 else 1
+    return datetime.datetime.combine(ahora_loc.date() + datetime.timedelta(days=dias), _hora(HORA_VENCE),
+                                     tzinfo=ahora_loc.tzinfo)
+
+
+def _dm(chat_id, texto, **kw):
+    return enviar_a_chat(chat_id, texto, **kw)
+
+
+def _es_admin(chat_id):
+    return bool(ADMIN_CHAT_ID) and str(chat_id) == str(ADMIN_CHAT_ID)
+
+
+def texto_bienvenida():
+    return (
+        f"\U0001F44B <b>Bienvenido a {esc(CANAL_NOMBRE)}</b>\n\n"
+        f"\U0001F512 <b>VIP · todas las paradas del día: {esc(PRECIO_DIA)}</b>\n"
+        f"\U0001F48E\U0001F4B0 <b>Especiales de ALTO DIVIDENDO: {esc(PRECIO_VALORES)}</b>\n\n"
+        f"1\uFE0F\u20E3 Paga en <b>USDT</b> por la red <b>{esc(USDT_RED)}</b> con el QR o a esta dirección:\n"
+        f"<code>{esc(USDT_DIRECCION)}</code>\n"
+        "   (desde Binance o cualquier otro exchange)\n"
+        f"\u26A0\uFE0F Usa SOLO la red {esc(USDT_RED)}.\n\n"
+        "2\uFE0F\u20E3 Envía <b>aquí mismo</b> la captura del comprobante.\n"
+        "3\uFE0F\u20E3 Lo verificamos y te llega tu acceso al momento \u2705"
+    )
+
+
+def _botones_aprobar(uid):
+    return {"inline_keyboard": [
+        [{"text": f"\u2705 Aprobar VIP {PRECIO_DIA}", "callback_data": f"a|vip|{uid}"}],
+        [{"text": f"\u2705 Aprobar Especiales {PRECIO_VALORES}", "callback_data": f"a|esp|{uid}"}],
+        [{"text": "\u274C Rechazar", "callback_data": f"a|no|{uid}"}],
+    ]}
+
+
+def manejar_mensaje_privado(msg):
+    chat = msg.get("chat", {})
+    uid = chat.get("id")
+    usuario = msg.get("from", {})
+    nombre = " ".join(x for x in (usuario.get("first_name"), usuario.get("last_name")) if x) or "Cliente"
+    texto = (msg.get("text") or "").strip()
+    if texto.startswith("/miid"):
+        _dm(uid, f"Tu ID de Telegram es: <code>{uid}</code>\nPonlo en Render como <b>ADMIN_CHAT_ID</b> "
+                 "si eres el administrador.")
+        return
+    if texto.startswith("/start") or texto.lower() in ("hola", "info", "precio", "precios", "vip"):
+        foto, foto_url = qr_binance()
+        _dm(uid, texto_bienvenida(), foto=foto, foto_url=foto_url)
+        return
+    if _es_admin(uid):
+        return  # lo que escribe el admin no se trata como comprobante
+    if not ADMIN_CHAT_ID:
+        _dm(uid, "Recibido. En breve te atendemos.")
+        print("[cobros] llego un comprobante pero falta ADMIN_CHAT_ID", flush=True)
+        return
+    # reenviar al admin + botones
+    llamar_telegram("copyMessage", {"chat_id": ADMIN_CHAT_ID, "from_chat_id": uid, "message_id": msg.get("message_id")})
+    alias = f" (@{usuario['username']})" if usuario.get("username") else ""
+    activos = [a for a in _leer_accesos() if str(a["uid"]) == str(uid) and not a.get("expulsado")
+               and a["plan"] == "vip"]
+    nota = "\n\U0001F501 <b>Ya tiene VIP activo</b>: aprobar VIP = renovar 1 día más." if activos else ""
+    llamar_telegram("sendMessage", {
+        "chat_id": ADMIN_CHAT_ID, "parse_mode": "HTML",
+        "text": f"\U0001F4E9 <b>Comprobante</b> de {esc(nombre)}{esc(alias)}\nID: <code>{uid}</code>{nota}\n\n"
+                "Revisa en Binance que llegó el pago y toca un botón:",
+        "reply_markup": _botones_aprobar(uid)})
+    _dm(uid, "\u2705 Recibimos tu comprobante. Lo estamos verificando, en unos minutos te llega tu acceso.")
+
+
+def especiales_de_hoy():
+    j = leer_jornada()
+    if not j or j.get("fecha") != ahora_local().strftime("%Y-%m-%d"):
+        return []
+    return [p for p in picks_menu(parsear_menu(j["menu"])) if "ALTO DIVIDENDO" in p["etiqueta"]]
+
+
+def entregar_especiales(uid):
+    picks = especiales_de_hoy()
+    if not picks:
+        return False
+    _dm(uid, f"\U0001F48E\U0001F4B0 <b>TUS ESPECIALES DE ALTO DIVIDENDO DE HOY</b>\U0001F48E\U0001F4B0\n"
+             f"{_cuenta(len(picks), 'ejemplar', 'ejemplares')} · PARADA LARGA")
+    for p in picks:
+        _dm(uid, p["texto"])
+    return True
+
+
+def entregar_especiales_pendientes():
+    """Cuando se carga el menu del dia, se envian los especiales a quien ya los habia pagado."""
+    hoy = ahora_local().strftime("%Y-%m-%d")
+    lista = _leer_accesos()
+    cambio = False
+    for a in lista:
+        if a["plan"] == "esp" and a.get("fecha") == hoy and not a.get("entregado"):
+            if entregar_especiales(a["uid"]):
+                a["entregado"] = True
+                cambio = True
+    if cambio:
+        _guardar_accesos(lista)
+
+
+def aprobar_vip(uid, nombre):
+    lista = _leer_accesos()
+    activo = next((a for a in lista if str(a["uid"]) == str(uid) and a["plan"] == "vip" and not a.get("expulsado")), None)
+    if activo:  # renovacion: un dia mas, sin link nuevo
+        vence = datetime.datetime.fromisoformat(activo["vence"]) + datetime.timedelta(days=1)
+        activo.update(vence=vence.isoformat(), avisado=False)
+        _guardar_accesos(lista)
+        _dm(uid, f"\u2705 <b>¡Renovado!</b> Sigues en el VIP de {esc(CANAL_NOMBRE)} hasta el "
+                 f"{a_local(vence).strftime('%d/%m %I:%M %p')}. ¡A ganar! \U0001F4AA")
+        return f"VIP renovado hasta {a_local(vence).strftime('%d/%m %I:%M %p')}"
+    vence = calcular_vencimiento()
+    res = llamar_telegram("createChatInviteLink", {
+        "chat_id": CHAT_ID_VIP, "name": f"CTV-{uid}"[:32], "member_limit": 1,
+        "expire_date": int(vence.timestamp())})
+    link = (res.get("resultado") or {}).get("invite_link") if res["entregado"] else None
+    if not link:
+        return f"NO se pudo crear el link: {res['error']} (¿el bot es admin del VIP con permiso de invitar?)"
+    lista.append({"uid": uid, "nombre": nombre, "plan": "vip", "creado": ahora_local().isoformat(),
+                  "vence": vence.isoformat(), "link": link, "miembro": None, "avisado": False, "expulsado": False})
+    _guardar_accesos(lista)
+    _dm(uid, f"\u2705 <b>¡Pago confirmado!</b>\n\nBienvenido al <b>VIP de {esc(CANAL_NOMBRE)}</b>. "
+             "Ahí tienes TODAS las paradas de hoy detalladas.\n\n"
+             f"\U0001F449 Entra aquí (link para 1 sola persona):\n{link}\n\n"
+             f"\u23F0 Tu acceso es válido hasta el {a_local(vence).strftime('%d/%m %I:%M %p')}.",
+        reply_markup={"inline_keyboard": [[{"text": "\U0001F512 Entrar al VIP", "url": link}]]})
+    return f"VIP aprobado hasta {a_local(vence).strftime('%d/%m %I:%M %p')}"
+
+
+def aprobar_especiales(uid, nombre):
+    lista = _leer_accesos()
+    hoy = ahora_local().strftime("%Y-%m-%d")
+    entregado = entregar_especiales(uid)
+    lista.append({"uid": uid, "nombre": nombre, "plan": "esp", "fecha": hoy, "entregado": entregado,
+                  "creado": ahora_local().isoformat()})
+    _guardar_accesos(lista)
+    if not entregado:
+        _dm(uid, "\u2705 <b>¡Pago confirmado!</b> Apenas publiquemos el menú de hoy te llegan aquí tus "
+                 "ESPECIALES DE ALTO DIVIDENDO \U0001F48E\U0001F4B0")
+        return "Especiales aprobados (se envían cuando cargues el menú de hoy)"
+    return "Especiales aprobados y enviados"
+
+
+def manejar_boton(cb):
+    datos = cb.get("data", "")
+    quien = cb.get("from", {}).get("id")
+    msg = cb.get("message", {})
+    if not (_es_admin(quien) or _es_admin(msg.get("chat", {}).get("id"))):
+        llamar_telegram("answerCallbackQuery", {"callback_query_id": cb.get("id"), "text": "Solo el administrador."})
+        return
+    try:
+        _, accion, uid = datos.split("|")
+    except ValueError:
+        return
+    nombre = (msg.get("text") or "").split("\n")[0].replace("\U0001F4E9 Comprobante de ", "")[:60]
+    if accion == "vip":
+        resultado = aprobar_vip(int(uid), nombre)
+    elif accion == "esp":
+        resultado = aprobar_especiales(int(uid), nombre)
+    else:
+        _dm(int(uid), "\u274C No pudimos verificar tu pago. Revisa que enviaste <b>USDT</b> por la red "
+                      f"<b>{esc(USDT_RED)}</b> y manda de nuevo el comprobante, o escríbenos por "
+                      f"{esc(contacto_visible(CONTACTO_INFO))}.")
+        resultado = "Rechazado"
+    llamar_telegram("answerCallbackQuery", {"callback_query_id": cb.get("id"), "text": resultado[:190]})
+    llamar_telegram("editMessageText", {
+        "chat_id": msg.get("chat", {}).get("id"), "message_id": msg.get("message_id"), "parse_mode": "HTML",
+        "text": esc(msg.get("text", "")) + f"\n\n<b>\u27A1\uFE0F {esc(resultado)}</b>"})
+
+
+def manejar_miembro(upd):
+    """Guarda quien entro al VIP con cada link (para sacarlo cuando venza)."""
+    if str(upd.get("chat", {}).get("id")) != str(CHAT_ID_VIP):
+        return
+    nuevo = upd.get("new_chat_member", {})
+    link = (upd.get("invite_link") or {}).get("invite_link")
+    if nuevo.get("status") != "member" or not link:
+        return
+    lista = _leer_accesos()
+    for a in lista:
+        if a.get("link") and a["link"].split("/")[-1][:12] == link.split("/")[-1][:12]:
+            a["miembro"] = nuevo.get("user", {}).get("id")
+    _guardar_accesos(lista)
+
+
+def manejar_update(upd):
+    if "callback_query" in upd:
+        manejar_boton(upd["callback_query"])
+    elif "chat_member" in upd:
+        manejar_miembro(upd["chat_member"])
+    elif "message" in upd and upd["message"].get("chat", {}).get("type") == "private":
+        manejar_mensaje_privado(upd["message"])
+
+
+def procesar_accesos():
+    """Aviso de renovacion la noche anterior y salida del VIP al vencer. Lo llama el hilo y /tick."""
+    if config_faltante():
+        return
+    ahora = ahora_local()
+    lista = _leer_accesos()
+    cambio = False
+    for a in lista:
+        if a["plan"] != "vip" or a.get("expulsado"):
+            continue
+        vence = datetime.datetime.fromisoformat(a["vence"])
+        aviso = datetime.datetime.combine(a_local(vence).date() - datetime.timedelta(days=1),
+                                          _hora(HORA_AVISO_RENOVAR), tzinfo=ahora.tzinfo)
+        if not a.get("avisado") and aviso <= ahora < vence:
+            foto, foto_url = qr_binance()
+            _dm(a["uid"], f"\u23F0 <b>Tu acceso VIP vence el {a_local(vence).strftime('%d/%m')} a las {a_local(vence).strftime('%I:%M %p').lstrip('0')}</b>\n\n"
+                          f"¿Seguimos mañana? Renueva por <b>{esc(PRECIO_DIA)}</b> y recibe TODAS las paradas del día "
+                          "(especiales de alto dividendo, ratas y best bets).\n\n"
+                          f"\U0001F4B3 USDT · Red {esc(USDT_RED)}\n<code>{esc(USDT_DIRECCION)}</code>\n\n"
+                          "Manda aquí tu comprobante y sigues dentro sin perder nada \U0001F4AA",
+                foto=foto, foto_url=foto_url)
+            a["avisado"] = True
+            cambio = True
+        if ahora >= vence:
+            quien = a.get("miembro") or a["uid"]
+            if not _es_admin(quien):
+                hasta = int(_time.time()) + 60
+                llamar_telegram("banChatMember", {"chat_id": CHAT_ID_VIP, "user_id": quien, "until_date": hasta})
+                llamar_telegram("unbanChatMember", {"chat_id": CHAT_ID_VIP, "user_id": quien, "only_if_banned": True})
+            if a.get("link"):
+                llamar_telegram("revokeChatInviteLink", {"chat_id": CHAT_ID_VIP, "invite_link": a["link"]})
+            _dm(a["uid"], f"\U0001F44B Tu acceso de hoy al VIP terminó. Cuando quieras volver, escríbenos aquí: "
+                          f"todas las paradas del día por <b>{esc(PRECIO_DIA)}</b>.")
+            a["expulsado"] = True
+            cambio = True
+    if cambio:
+        limite = ahora - datetime.timedelta(days=7)
+        lista = [a for a in lista if not a.get("expulsado") or
+                 datetime.datetime.fromisoformat(a.get("vence", a.get("creado"))) > limite]
+        _guardar_accesos(lista)
+
+
+def accesos_para_panel():
+    salida = []
+    for a in _leer_accesos():
+        if a["plan"] == "vip":
+            estado = "terminado" if a.get("expulsado") else "activo"
+            det = f"VIP hasta {a_local(datetime.datetime.fromisoformat(a['vence'])).strftime('%d/%m %I:%M %p')}"
+        else:
+            estado = "entregado" if a.get("entregado") else "pendiente"
+            det = f"Especiales del {a.get('fecha')}"
+        salida.append({"nombre": a.get("nombre") or a["uid"], "detalle": det, "estado": estado})
+    return list(reversed(salida))[:30]
+
+
+@app.route("/tg-webhook", methods=["POST"])
+def tg_webhook():
+    if not WEBHOOK_SECRET or not hmac.compare_digest(
+            request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""), _secreto_tg()):
+        return "", 403
+    try:
+        manejar_update(request.get_json(silent=True) or {})
+    except Exception as exc:  # Telegram reintenta si respondemos error: mejor registrar y seguir
+        print(f"[tg-webhook] error: {exc!r}", flush=True)
+    return "ok", 200
+
+
+@app.route("/bot-conectar", methods=["POST"])
+def bot_conectar():
+    if not auth_ok():
+        return respuesta_no_autorizado()
+    if config_faltante():
+        return render_panel(detalle="Configuración incompleta.", faltantes=config_faltante(), status=503)
+    url = "https://" + request.host + "/tg-webhook"
+    r = llamar_telegram("setWebhook", {"url": url, "secret_token": _secreto_tg(),
+                                       "allowed_updates": ["message", "callback_query", "chat_member"]})
+    estado_bot(forzar=True)
+    if r["entregado"]:
+        return render_panel(programado=f"Cobros activados: el bot ya recibe comprobantes ({url}).")
+    return render_panel(detalle=f"No se pudo activar: {r['error']}", status=502)
 
 
 @app.route("/webhook-resultados", methods=["POST"])
@@ -1949,6 +2326,7 @@ def tick():
     """Para UptimeRobot / cron-job.org cada 5 min: mantiene despierto el servicio y envia lo pendiente."""
     arrancar_hilo_cola()
     n = procesar_cola()
+    procesar_accesos()
     pendientes = sum(1 for c in _leer_cola() if c["estado"] == "pendiente")
     return jsonify({"ok": True, "enviados_ahora": n, "pendientes": pendientes}), 200
 
