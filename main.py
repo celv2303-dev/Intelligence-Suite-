@@ -1932,7 +1932,7 @@ def publicar_menu():
 import hashlib as _hashlib
 import time as _time
 
-ADMIN_CHAT_ID = _env("ADMIN_CHAT_ID")              # tu ID personal de Telegram (el bot te lo dice con /miid)
+ADMIN_CHAT_ID = _env("ADMIN_CHAT_ID") or "1338450632"   # tu ID personal de Telegram (el bot te lo dice con /miid)
 HORA_AVISO_RENOVAR = _env("HORA_AVISO_RENOVAR") or "21:00"   # aviso de renovacion la noche anterior al vencimiento
 HORA_VENCE = _env("HORA_VENCE") or "05:00"          # a esta hora (Venezuela) sale del VIP quien no renovo
 ACCESOS_PATH = os.path.join(BASE_DIR, "accesos.json")
