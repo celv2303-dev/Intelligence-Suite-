@@ -1146,7 +1146,7 @@ def venta_valores(menu, precio_valores):
         "\U0001F48E\U0001F4B0\U0001F48E\U0001F4B0\U0001F48E\n"
         "<b>ESPECIALES DE ALTO DIVIDENDO</b>\n"
         "\U0001F48E\U0001F4B0\U0001F48E\U0001F4B0\U0001F48E\n\n"
-        f"Hoy tenemos <b>{_cuenta(n, 'ejemplar especial', 'ejemplares especiales')}</b> que "
+        f"Hoy tenemos <b>{_cuenta(n, 'ejemplar especial', 'ejemplares especiales')}</b> "
         "de <b>ALTO DIVIDENDO</b> \U0001F4B5\U0001F4B5\n"
         "\U0001F3AF <b>PARADA LARGA</b>\n"
         + rango + "\n"
