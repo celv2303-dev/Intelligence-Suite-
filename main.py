@@ -88,6 +88,9 @@ VALOR_ESPECIAL = _env("VALOR_ESPECIAL") or "$4.99"
 PRECIO_DIA = _env("PRECIO_DIA") or "$15.99"
 # Precio de todos los caballos de valor juntos (una sola promocion)
 PRECIO_VALORES = _env("PRECIO_VALORES") or "$9.99"
+# Rango de cuotas que se anuncia en la venta de los especiales de alto dividendo
+CUOTA_DESDE = _env("CUOTA_DESDE") or "5 a 1"
+CUOTA_HASTA = _env("CUOTA_HASTA") or "20 a 1"
 # Zona horaria de las horas que vienen en tu menu (hipodromos de EE. UU. = hora del Este)
 ZONA_MENU = _env("ZONA_MENU") or "America/New_York"
 USDT_DIRECCION = _env("USDT_DIRECCION") or "0x45d608619ea45555d3c458fb178113f7d96c109a"
@@ -1135,13 +1138,8 @@ def venta_valores(menu, precio_valores):
         if i["resena"]:
             b += f"\n\U0001F4DD <i>{esc(i['resena'])}</i>"
         bloques.append(b)
-    mls = [_precio_ml(i["ml"]) for _, i in vals]
-    mls = [m for m in mls if m]
-    rango = ""
-    if mls:
-        lo, hi = min(mls), max(mls)
-        rango = (f"\U0001F4C8 Cuotas de <b>{_fmt_ml(lo)}</b> hasta <b>{_fmt_ml(hi)}</b>\n" if lo != hi
-                 else f"\U0001F4C8 Cuota de <b>{_fmt_ml(lo)}</b>\n")
+    rango = (f"\U0001F4B0 Cuotas de <b>{esc(CUOTA_DESDE)}</b> hasta <b>{esc(CUOTA_HASTA)}</b> \U0001F4B0\n"
+             if CUOTA_DESDE and CUOTA_HASTA else "")
     return (
         "\U0001F48E\U0001F4B0\U0001F48E\U0001F4B0\U0001F48E\n"
         "<b>ESPECIALES DE ALTO DIVIDENDO</b>\n"
