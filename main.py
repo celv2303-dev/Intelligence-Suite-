@@ -917,8 +917,18 @@ _DIAS_TXT = {"lunes": "LUNES", "martes": "MARTES", "miercoles": "MIÉRCOLES", "j
              "viernes": "VIERNES", "sabado": "SÁBADO", "domingo": "DOMINGO"}
 
 
-_RE_FILA = _re.compile(r"^\s*([0-9]{1,2}:[0-9]{2}\s*[AaPp]\.?\s*[Mm]\.?)\s+(.+?)\s+C\s*(\d+)\s+(.+)$")
-_RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*\(([^)]+)\)\s*[·\-|:,]?\s*(.*)$")
+# Fila de tabla: hora (con o sin AM/PM), hipodromo, carrera, y el resto (etiqueta, ejemplar, ML, jugada)
+_RE_FILA = _re.compile(r"^\s*([0-9]{1,2}:[0-9]{2})\s*([AaPp]\.?\s*[Mm]\.?)?\s+(.+?)\s+C\s*(\d+)\s+(.+)$")
+# Ejemplar: "#5 Send Cash (15/1) jugamos..." o "#5 Send Cash  15/1 jugamos..." (ML con o sin parentesis)
+_RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*(?:\(\s*(\d+\s*[/-]\s*\d+)\s*\)|[\t ]+(\d+\s*[/-]\s*\d+)(?=\s|$))\s*[·\-|:,]?\s*(.*)$")
+
+
+def _hora_fila(hhmm, ampm):
+    """'1:15' sin AM/PM -> '1:15 PM' (las carreras son de tarde; 10 y 11 se toman como AM)."""
+    if ampm:
+        return f"{hhmm} {ampm.upper().replace('.', '').replace(' ', '')}"
+    h = int(hhmm.split(":")[0])
+    return f"{hhmm} {'AM' if h in (10, 11) else 'PM'}"
 
 
 def _etiqueta_de(plano):
@@ -961,7 +971,8 @@ def parsear_menu(texto):
         # Formato tabla: "1:10 PM  Belmont Park  C1  💰 VALOR · #5 True Adirondacker (5/1) jugamos 4nini"
         fila = _RE_FILA.match(cruda.strip())
         if fila:
-            hora, nombre_hip, carrera, parada = fila.groups()
+            hhmm, ampm, nombre_hip, carrera, parada = fila.groups()
+            hora = _hora_fila(hhmm, ampm)
             etq = _etiqueta_de(_sin_acentos(parada))
             mp = _RE_PICK_FILA.search(parada)
             if etq and mp:
@@ -970,9 +981,10 @@ def parsear_menu(texto):
                 if actual is None:
                     actual = {"nombre": nombre_hip, "items": []}
                     hipodromos.append(actual)
-                ultimo = {"etiqueta": etq, "hora": hora.upper().replace(".", "").replace(" ", "")[:-2] + " " + hora.upper().replace(".", "")[-2:],
-                          "carrera": carrera, "numero": mp.group(1), "caballo": mp.group(2).strip(),
-                          "ml": mp.group(3).strip(), "tipo": mp.group(4).strip(" ·-|:,"), "resena": ""}
+                ml = (mp.group(3) or mp.group(4) or "").replace(" ", "")
+                ultimo = {"etiqueta": etq, "hora": hora,
+                          "carrera": carrera, "numero": mp.group(1), "caballo": mp.group(2).strip(" \t·|"),
+                          "ml": ml, "tipo": mp.group(5).strip(" ·-|:,\t"), "resena": ""}
                 mfree = _re.search(r"parada\s*free\s*(\d+)", ultimo["tipo"], _re.I)
                 if mfree:
                     ultimo["free"] = mfree.group(1)
@@ -983,6 +995,12 @@ def parsear_menu(texto):
         if ultimo is not None and plano.startswith("RESENA"):
             if ultimo["etiqueta"] == "VALOR":
                 ultimo["resena"] = (ultimo["resena"] + " " + _re.sub(r"(?i)^rese[ñn]a\s*(vip)?\s*:?\s*", "", linea)).strip()
+            continue
+        # Reseña en lineas sueltas debajo de un VALOR (sin "Reseña VIP:")
+        if (ultimo is not None and ultimo["etiqueta"] == "VALOR" and not linea.startswith("\U0001F3C7")
+                and "\u23F0" not in linea and _etiqueta_de(plano) is None and "HOY NO HAY" not in plano
+                and "ESTA LISTA" not in plano and "PARA EL GRUPO VIP" not in plano):
+            ultimo["resena"] = (ultimo["resena"] + " " + linea).strip()
             continue
         if linea.startswith("\U0001F3C7"):
             actual = {"nombre": linea.lstrip("\U0001F3C7").strip(), "items": []}
