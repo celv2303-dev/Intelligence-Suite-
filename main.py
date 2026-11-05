@@ -923,6 +923,12 @@ _RE_FILA = _re.compile(r"^\s*([0-9]{1,2}:[0-9]{2})\s*([AaPp]\.?\s*[Mm]\.?)?\s+(.
 _RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*(?:\(\s*(\d+\s*[/-]\s*\d+)\s*\)|[\t ]+(\d+\s*[/-]\s*\d+)(?=\s|$))\s*[·\-|:,]?\s*(.*)$")
 
 
+def _quitar_etiqueta(t):
+    """Quita la etiqueta del texto de la jugada ('✖ RATA DEL DÍA pago dar...' -> 'pago dar...')."""
+    t = _re.sub(r"(?i)[✖💰★⭐\s]*(RATAS? DEL D[IÍ]A|RATAS? FUERTES?|VALOR DEL D[IÍ]A|VALOR|BEST BET)\b", " ", t or "")
+    return _re.sub(r"\s+", " ", t).strip(" ·-|:,\t")
+
+
 def _hora_fila(hhmm, ampm):
     """'1:15' sin AM/PM -> '1:15 PM' (las carreras son de tarde; 10 y 11 se toman como AM)."""
     if ampm:
@@ -976,7 +982,8 @@ def parsear_menu(texto):
             etq = _etiqueta_de(_sin_acentos(parada))
             mp = _RE_PICK_FILA.search(parada)
             if etq and mp:
-                nombre_hip = nombre_hip.strip(" \t·|")
+                # "2:10 (3:10)  Belmont": la hora de Caracas entre parentesis no es parte del hipodromo
+                nombre_hip = _re.sub(r"^\(\s*\d{1,2}:\d{2}\s*\)\s*", "", nombre_hip.strip()).strip(" \t·|")
                 actual = next((h for h in hipodromos if h["nombre"].lower() == nombre_hip.lower()), None)
                 if actual is None:
                     actual = {"nombre": nombre_hip, "items": []}
@@ -984,11 +991,12 @@ def parsear_menu(texto):
                 ml = (mp.group(3) or mp.group(4) or "").replace(" ", "")
                 ultimo = {"etiqueta": etq, "hora": hora,
                           "carrera": carrera, "numero": mp.group(1), "caballo": mp.group(2).strip(" \t·|"),
-                          "ml": ml, "tipo": mp.group(5).strip(" ·-|:,\t"), "resena": ""}
-                mfree = _re.search(r"parada\s*free\s*(\d+)", ultimo["tipo"], _re.I)
+                          "ml": ml, "tipo": _quitar_etiqueta(mp.group(5)), "resena": ""}
+                mfree = _re.search(r"parada\s*free\s*(\d*)", ultimo["tipo"], _re.I)
                 if mfree:
-                    ultimo["free"] = mfree.group(1)
-                    ultimo["tipo"] = _re.sub(r"parada\s*free\s*\d+", "", ultimo["tipo"], flags=_re.I).strip(" ·-|:,")
+                    # "parada free" sin numero: se numera en orden (1, 2...)
+                    ultimo["free"] = mfree.group(1) or str(1 + sum(1 for hh in hipodromos for it in hh["items"] if it.get("free")))
+                    ultimo["tipo"] = _re.sub(r"parada\s*free\s*\d*", "", ultimo["tipo"], flags=_re.I).strip(" ·-|:,\t")
                 actual["items"].append(ultimo)
                 etiqueta = etq
             continue
