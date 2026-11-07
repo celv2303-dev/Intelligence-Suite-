@@ -895,11 +895,12 @@ def mensaje_pick(etiqueta, hipodromo, carrera, numero, caballo, tipo_apuesta,
             "",
             f"\U0001F449 <b>{esc(jugada)}</b>",
             "",
-            f"\U0001F4C8 <i>Cuota {esc(cuota)}</i>" + (f"   \U0001F4CD <i>STAKE {esc(unidades)}</i>" if unidades else ""),
+            ((f"\U0001F4C8 <i>Cuota {esc(cuota)}</i>" if cuota else "")
+             + (f"   \U0001F4CD <i>STAKE {esc(unidades)}</i>" if unidades else "")),
         ]
     if analisis:
         partes += ["", f"\U0001F4CB {esc(analisis)}"]
-    texto = "\n".join(partes)
+    texto = _re.sub(r"\n{3,}", "\n\n", "\n".join(partes)).strip()
     texto += linea_bono()
     texto += "\n\n\U0001F51E Juega con responsabilidad."
     return texto
@@ -921,6 +922,10 @@ _DIAS_TXT = {"lunes": "LUNES", "martes": "MARTES", "miercoles": "MIÉRCOLES", "j
 _RE_FILA = _re.compile(r"^\s*([0-9]{1,2}:[0-9]{2})\s*([AaPp]\.?\s*[Mm]\.?)?\s+(.+?)\s+C\s*(\d+)\s+(.+)$")
 # Ejemplar: "#5 Send Cash (15/1) jugamos..." o "#5 Send Cash  15/1 jugamos..." (ML con o sin parentesis)
 _RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*(?:\(\s*(\d+\s*[/-]\s*\d+)\s*\)|[\t ]+(\d+\s*[/-]\s*\d+)(?=\s|$))\s*[·\-|:,]?\s*(.*)$")
+
+
+# Ejemplar sin ML: "#4 Mad Banker<TAB>💰 VALOR jugamos..." (el nombre termina en tab, doble espacio o la etiqueta)
+_RE_PICK_SIN_ML = _re.compile(r"#\s*(\d+)\s+([^\t✖💰★⭐]+?)\s*(?:\t|\s{2,}|(?=[✖💰★⭐]))\s*(.*)$")
 
 
 def _quitar_etiqueta(t):
@@ -980,18 +985,19 @@ def parsear_menu(texto):
             hhmm, ampm, nombre_hip, carrera, parada = fila.groups()
             hora = _hora_fila(hhmm, ampm)
             etq = _etiqueta_de(_sin_acentos(parada))
-            mp = _RE_PICK_FILA.search(parada)
+            mp = _RE_PICK_FILA.search(parada) or _RE_PICK_SIN_ML.search(parada)
             if etq and mp:
                 # "2:10 (3:10)  Belmont": la hora de Caracas entre parentesis no es parte del hipodromo
-                nombre_hip = _re.sub(r"^\(\s*\d{1,2}:\d{2}\s*\)\s*", "", nombre_hip.strip()).strip(" \t·|")
+                nombre_hip = _re.sub(r"^\(?\s*\d{1,2}:\d{2}\s*(?:[AaPp]\.?\s*[Mm]\.?)?\s*\)?\s*", "",
+                                     nombre_hip.strip()).strip(" \t·|")
                 actual = next((h for h in hipodromos if h["nombre"].lower() == nombre_hip.lower()), None)
                 if actual is None:
                     actual = {"nombre": nombre_hip, "items": []}
                     hipodromos.append(actual)
-                ml = (mp.group(3) or mp.group(4) or "").replace(" ", "")
+                ml = (mp.group(3) or mp.group(4) or "").replace(" ", "") if mp.re is _RE_PICK_FILA else ""
                 ultimo = {"etiqueta": etq, "hora": hora,
                           "carrera": carrera, "numero": mp.group(1), "caballo": mp.group(2).strip(" \t·|"),
-                          "ml": ml, "tipo": _quitar_etiqueta(mp.group(5)), "resena": ""}
+                          "ml": ml, "tipo": _quitar_etiqueta(mp.group(5) if mp.re is _RE_PICK_FILA else mp.group(3)), "resena": ""}
                 mfree = _re.search(r"parada\s*free\s*(\d*)", ultimo["tipo"], _re.I)
                 if mfree:
                     # "parada free" sin numero: se numera en orden (1, 2...)
@@ -1132,7 +1138,8 @@ def picks_menu(menu):
             else:
                 texto = mensaje_pick(etq, h["nombre"], i["carrera"], i["numero"], i["caballo"], i["tipo"],
                                      i["ml"], "", i["resena"] if i["etiqueta"] == "VALOR" else "", hora=hora)
-            titulo = (f"{etq} · {h['nombre']} C{i['carrera']} · #{i['numero']} {i['caballo']} ({i['ml']})"
+            titulo = (f"{etq} · {h['nombre']} C{i['carrera']} · #{i['numero']} {i['caballo']}"
+                      + (f" ({i['ml']})" if i["ml"] else "")
                       + (f" · {i['tipo']}" if i["tipo"] else "") + f" · {hora}")
             salida.append({"titulo": titulo, "etiqueta": etq, "texto": texto, "destino": destino,
                            "item": i, "hipodromo": h["nombre"]})
