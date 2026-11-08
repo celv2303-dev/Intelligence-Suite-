@@ -990,6 +990,7 @@ def parsear_menu(texto):
                 # "2:10 (3:10)  Belmont": la hora de Caracas entre parentesis no es parte del hipodromo
                 nombre_hip = _re.sub(r"^\(?\s*\d{1,2}:\d{2}\s*(?:[AaPp]\.?\s*[Mm]\.?)?\s*\)?\s*", "",
                                      nombre_hip.strip()).strip(" \t·|")
+                nombre_hip = _re.sub(r"[^\w\s'.&-]", "", nombre_hip).strip()
                 actual = next((h for h in hipodromos if h["nombre"].lower() == nombre_hip.lower()), None)
                 if actual is None:
                     actual = {"nombre": nombre_hip, "items": []}
@@ -1006,6 +1007,15 @@ def parsear_menu(texto):
                 actual["items"].append(ultimo)
                 etiqueta = etq
             continue
+        # Linea de detalle "C7 #11 Mad Mo (8/1) · 3:55 PM ET ... · grama": solo aporta el ML que faltaba
+        if ultimo is not None:
+            md = _re.search(r"#\s*(\d+)\s+.+?\(\s*(\d+\s*[/-]\s*\d+)\s*\)", linea)
+            if md and md.group(1) == ultimo["numero"]:
+                if not ultimo["ml"]:
+                    ultimo["ml"] = md.group(2).replace(" ", "")
+                continue
+        plano = plano.lstrip("\U0001F510\U0001F512 ").strip()
+        linea = _re.sub(r"^[\U0001F510\U0001F512\s]+", "", linea)
         if ultimo is not None and plano.startswith("RESENA"):
             if ultimo["etiqueta"] == "VALOR":
                 ultimo["resena"] = (ultimo["resena"] + " " + _re.sub(r"(?i)^rese[ñn]a\s*(vip)?\s*:?\s*", "", linea)).strip()
