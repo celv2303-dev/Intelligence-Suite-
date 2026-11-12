@@ -930,7 +930,7 @@ _RE_PICK_SIN_ML = _re.compile(r"#\s*(\d+)\s+([^\t✖💰★⭐]+?)\s*(?:\t|\s{2,
 
 def _quitar_etiqueta(t):
     """Quita la etiqueta del texto de la jugada ('✖ RATA DEL DÍA pago dar...' -> 'pago dar...')."""
-    t = _re.sub(r"(?i)[✖💰★⭐\s]*(RATAS? DEL D[IÍ]A|RATAS? FUERTES?|VALOR DEL D[IÍ]A|VALOR|BEST BET)\b", " ", t or "")
+    t = _re.sub(r"(?i)[✖💰★⭐\s]*(RATAS? DEL D[IÍ]A|RATAS? FUERT\w*|VALOR DEL D[IÍ]A|VALOR|BEST BET)\b", " ", t or "")
     return _re.sub(r"\s+", " ", t).strip(" ·-|:,\t")
 
 
@@ -945,7 +945,7 @@ def _hora_fila(hhmm, ampm):
 def _etiqueta_de(plano):
     if "BEST BET" in plano:
         return "BEST BET"
-    if "RATA" in plano and "FUERTE" in plano:
+    if "RATA" in plano and "FUERT" in plano:   # acepta "FUERT" mal escrito
         return "RATA FUERTE"
     if "RATA" in plano:
         return "RATA DEL DÍA"
@@ -1040,7 +1040,7 @@ def parsear_menu(texto):
             nueva = "BEST BET"
         elif "VALOR DEL DIA" in plano:
             nueva = "VALOR"
-        elif "RATA" in plano and "FUERTE" in plano:
+        elif "RATA" in plano and "FUERT" in plano:
             nueva = "RATA FUERTE"
         elif "RATA DEL DIA" in plano or "RATAS DEL DIA" in plano:
             nueva = "RATA DEL DÍA"
