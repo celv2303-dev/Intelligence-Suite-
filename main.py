@@ -79,7 +79,8 @@ BONO_LINK = _env("BONO_LINK")               # link de afiliado (opcional, por ah
 # El QR se toma de un archivo binance_qr.png / .jpg subido al repositorio,
 # o de BINANCE_QR (URL publica o file_id de Telegram).
 BINANCE_QR = _env("BINANCE_QR")
-BINANCE_PAY_ID = _env("BINANCE_PAY_ID")     # opcional: se muestra junto al QR
+BINANCE_PAY_ID = _env("BINANCE_PAY_ID") or "16937059"               # Binance Pay (ID)
+BINANCE_PAY_EMAIL = _env("BINANCE_PAY_EMAIL") or "celv2303@gmail.com"  # Binance Pay (correo)
 # Deposito de USDT (el QR de binance_qr.png apunta a esta direccion)
 USDT_RED = _env("USDT_RED") or "BSC (BEP20)"
 # Precio del ESPECIAL (sale entre parentesis en el menu y en la venta)
@@ -210,13 +211,12 @@ PLANTILLAS_VENTA = {
         ),
     },
     "pago": {
-        "nombre": "💳 Cómo pagar (USDT · QR)",
+        "nombre": "💳 Cómo pagar (Binance Pay / USDT)",
         "texto": (
             "💳 <b>CÓMO ENTRAR AL VIP DE {canal}</b>{linea_oferta}\n\n"
-            "1️⃣ Envía <b>USDT</b> por la red <b>{red}</b>: escanea el QR o copia la dirección:\n"
-            "<code>{direccion}</code>\n"
-            "   Puedes pagar desde Binance o desde cualquier otro exchange o billetera.{linea_pay_id}\n"
-            "2️⃣ ⚠️ Usa SOLO la red {red}. Si envías por otra red, el pago se pierde.\n"
+            "1️⃣ Paga por cualquiera de estas dos vías:\n"
+            "{metodos}\n"
+            "2️⃣ ⚠️ Si pagas con USDT, usa SOLO la red {red}. Si envías por otra red, el pago se pierde.\n"
             "3️⃣ Manda la captura del comprobante{linea_contacto}.\n"
             "4️⃣ Te damos acceso al momento ✅\n\n"
             "🎟 Plazas limitadas."
@@ -1180,9 +1180,23 @@ def _cuenta(n, uno, varios):
     return f"{n} {uno if n == 1 else varios}"
 
 
+def metodos_pago_html():
+    """Las dos formas de pagar: Binance Pay (ID o correo) y USDT por la red BSC con el QR."""
+    lineas = []
+    if BINANCE_PAY_ID or BINANCE_PAY_EMAIL:
+        lineas.append("\U0001F7E1 <b>Binance Pay</b> (sin comisión entre usuarios de Binance)")
+        if BINANCE_PAY_ID:
+            lineas.append(f"   ID: <code>{esc(BINANCE_PAY_ID)}</code>")
+        if BINANCE_PAY_EMAIL:
+            lineas.append(f"   Correo: <code>{esc(BINANCE_PAY_EMAIL)}</code>")
+    lineas.append(f"\U0001F4B3 <b>USDT · Red {esc(USDT_RED)}</b> (QR, desde cualquier exchange)")
+    lineas.append(f"<code>{esc(USDT_DIRECCION)}</code>")
+    return "\n".join(lineas)
+
+
 def _bloque_pago():
     visible = esc(contacto_visible(contacto_pago()))
-    return (f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
+    return (metodos_pago_html()
             + (f"\n\U0001F4E9 Comprobante a: {visible}" if visible else ""))
 
 
@@ -1618,7 +1632,7 @@ def mensaje_venta(clave, oferta, monto, contacto, texto_libre, resena=""):
     url = url_publica(contacto)
     visible = esc(contacto_visible(contacto))
     linea_contacto = f" a {visible}" if contacto else ""
-    pago = (f"\U0001F4B3 Pago en USDT · Red {esc(USDT_RED)} (QR)\n<code>{esc(USDT_DIRECCION)}</code>"
+    pago = (metodos_pago_html()
             + (f"\n\U0001F4E9 Comprobante a: {visible}" if contacto else ""))
     plantilla = PLANTILLAS_VENTA[clave]["texto"]
     return plantilla.format(
@@ -1629,7 +1643,8 @@ def mensaje_venta(clave, oferta, monto, contacto, texto_libre, resena=""):
         linea_oferta=(f" (<b>{esc(oferta)}</b>)" if oferta else ""),
         red=esc(USDT_RED),
         direccion=esc(USDT_DIRECCION),
-        linea_pay_id=(f"\n   Binance Pay ID: <code>{esc(BINANCE_PAY_ID)}</code>" if BINANCE_PAY_ID else ""),
+        linea_pay_id="",
+        metodos=metodos_pago_html(),
         linea_contacto=linea_contacto,
         canal=esc(CANAL_NOMBRE),
         oferta=esc(oferta),
@@ -2104,10 +2119,9 @@ def texto_bienvenida():
         f"\U0001F44B <b>Bienvenido a {esc(CANAL_NOMBRE)}</b>\n\n"
         f"\U0001F512 <b>VIP · todas las paradas del día: {esc(PRECIO_DIA)}</b>\n"
         f"\U0001F48E\U0001F4B0 <b>Especiales de ALTO DIVIDENDO: {esc(PRECIO_VALORES)}</b>\n\n"
-        f"1\uFE0F\u20E3 Paga en <b>USDT</b> por la red <b>{esc(USDT_RED)}</b> con el QR o a esta dirección:\n"
-        f"<code>{esc(USDT_DIRECCION)}</code>\n"
-        "   (desde Binance o cualquier otro exchange)\n"
-        f"\u26A0\uFE0F Usa SOLO la red {esc(USDT_RED)}.\n\n"
+        "1\uFE0F\u20E3 Paga por cualquiera de estas dos vías:\n"
+        + metodos_pago_html() + "\n"
+        f"\u26A0\uFE0F Con USDT usa SOLO la red {esc(USDT_RED)}.\n\n"
         "2\uFE0F\u20E3 Envía <b>aquí mismo</b> la captura del comprobante.\n"
         "3\uFE0F\u20E3 Lo verificamos y te llega tu acceso al momento \u2705"
     )
@@ -2312,7 +2326,7 @@ def procesar_accesos():
             _dm(a["uid"], f"\u23F0 <b>Tu acceso VIP vence el {a_local(vence).strftime('%d/%m')} a las {a_local(vence).strftime('%I:%M %p').lstrip('0')}</b>\n\n"
                           f"¿Seguimos mañana? Renueva por <b>{esc(PRECIO_DIA)}</b> y recibe TODAS las paradas del día "
                           "(especiales de alto dividendo, ratas y best bets).\n\n"
-                          f"\U0001F4B3 USDT · Red {esc(USDT_RED)}\n<code>{esc(USDT_DIRECCION)}</code>\n\n"
+                          + metodos_pago_html() + "\n\n"
                           "Manda aquí tu comprobante y sigues dentro sin perder nada \U0001F4AA",
                 foto=foto, foto_url=foto_url)
             a["avisado"] = True
