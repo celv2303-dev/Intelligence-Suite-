@@ -1531,9 +1531,94 @@ def _bucle_cola():
         try:
             procesar_cola()
             procesar_accesos()
+            respaldar_estado()
         except Exception as exc:  # el hilo nunca debe morir
             print(f"[cola] error: {exc!r}", flush=True)
         time.sleep(30)
+
+
+# ==========================================
+# RESPALDO DEL ESTADO EN TELEGRAM (sobrevive a los reinicios de Render)
+# ==========================================
+_RESPALDO = {"msg_id": None, "hash": None, "restaurado": False}
+_respaldo_lock = _threading.Lock()
+NOMBRE_RESPALDO = "corridatv_estado.json"
+
+
+def _rutas_estado():
+    return {"jornada": JORNADA_PATH, "cola": COLA_PATH, "accesos": ACCESOS_PATH}
+
+
+def _leer_json(ruta):
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def respaldar_estado(forzar=False):
+    """Sube el estado (jornada, cola, accesos) como archivo fijado en el chat del admin, solo si cambio."""
+    if not (ADMIN_CHAT_ID and TELEGRAM_TOKEN):
+        return
+    with _respaldo_lock:
+        estado = {k: _leer_json(r) for k, r in _rutas_estado().items()}
+        if not any(estado.values()):
+            return
+        cuerpo = json.dumps(estado, ensure_ascii=False, sort_keys=True)
+        h = _hashlib.sha256(cuerpo.encode()).hexdigest()
+        if h == _RESPALDO["hash"] and not forzar:
+            return
+        archivo = {"documento": (NOMBRE_RESPALDO, cuerpo.encode(), "application/json")}
+        leyenda = "\U0001F512 Respaldo automático CORRIDATV · no borrar ni desfijar"
+        ok = False
+        if _RESPALDO["msg_id"]:
+            r = llamar_telegram("editMessageMedia", {
+                "chat_id": ADMIN_CHAT_ID, "message_id": _RESPALDO["msg_id"],
+                "media": {"type": "document", "media": "attach://documento", "caption": leyenda}}, archivo)
+            ok = r["entregado"] or "not modified" in (r["error"] or "")
+        if not ok:
+            r = llamar_telegram("sendDocument", {"chat_id": ADMIN_CHAT_ID, "caption": leyenda,
+                                                 "disable_notification": "true"}, archivo)
+            if r["entregado"] and r["message_id"]:
+                _RESPALDO["msg_id"] = r["message_id"]
+                llamar_telegram("pinChatMessage", {"chat_id": ADMIN_CHAT_ID, "message_id": r["message_id"],
+                                                   "disable_notification": True})
+                ok = True
+        if ok:
+            _RESPALDO["hash"] = h
+
+
+def restaurar_estado():
+    """Al arrancar: si se borraron los archivos (reinicio de Render), los recupera del respaldo fijado."""
+    if _RESPALDO["restaurado"] or not (ADMIN_CHAT_ID and TELEGRAM_TOKEN):
+        return
+    _RESPALDO["restaurado"] = True
+    r = llamar_telegram("getChat", {"chat_id": ADMIN_CHAT_ID})
+    fijado = (r.get("resultado") or {}).get("pinned_message") if r["entregado"] else None
+    doc = (fijado or {}).get("document") or {}
+    if doc.get("file_name") != NOMBRE_RESPALDO:
+        return
+    _RESPALDO["msg_id"] = fijado.get("message_id")
+    if all(_leer_json(ruta) is None for ruta in _rutas_estado().values()):
+        f = llamar_telegram("getFile", {"file_id": doc.get("file_id")})
+        ruta_tg = (f.get("resultado") or {}).get("file_path") if f["entregado"] else None
+        if not ruta_tg:
+            return
+        try:
+            resp = requests.get(f"https://api.telegram.org/file/bot{TELEGRAM_TOKEN}/{ruta_tg}", timeout=TIMEOUT_SEG)
+            estado = resp.json()
+        except (requests.RequestException, ValueError):
+            return
+        for k, ruta in _rutas_estado().items():
+            if estado.get(k) is not None:
+                tmp = ruta + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump(estado[k], fh, ensure_ascii=False)
+                os.replace(tmp, ruta)
+        print("[respaldo] estado recuperado del respaldo fijado", flush=True)
+    estado_local = json.dumps({k: _leer_json(r) for k, r in _rutas_estado().items()}, ensure_ascii=False, sort_keys=True)
+    _RESPALDO["hash"] = _hashlib.sha256(estado_local.encode()).hexdigest()
 
 
 _hilo_cola = None
@@ -1541,6 +1626,10 @@ _hilo_cola = None
 
 def arrancar_hilo_cola():
     global _hilo_cola
+    try:
+        restaurar_estado()
+    except Exception as exc:
+        print(f"[respaldo] no se pudo restaurar: {exc!r}", flush=True)
     if _hilo_cola is None or not _hilo_cola.is_alive():
         _hilo_cola = _threading.Thread(target=_bucle_cola, daemon=True, name="cola-corridatv")
         _hilo_cola.start()
@@ -2025,6 +2114,10 @@ def publicar_menu():
     if not items:
         return responder_error(quiere_json, ["no hay nada que programar (¿las carreras ya pasaron? usa MODO PRUEBA)"])
     encolar(items)
+    try:
+        respaldar_estado()
+    except Exception:
+        pass
     guardar_jornada(texto, nota)
     entregar_especiales_pendientes()
     arrancar_hilo_cola()
