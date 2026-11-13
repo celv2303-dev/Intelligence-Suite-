@@ -358,6 +358,14 @@ PAGINA_INICIO = """
                 </div>
                 {% endif %}
             </form>
+            {% if not resultados_picks %}
+            <form action="/resultados-cargar" method="POST" style="margin-top:18px">
+                <div style="background:#1e3a8a;padding:8px 12px;border-radius:6px;font-weight:bold">&#127937; Resultados: no hay jornada guardada</div>
+                <div class="ayuda">Si el bot se reinició y se borró la jornada, pega aquí el menú del día para marcar los resultados.</div>
+                <textarea name="menu" rows="5" placeholder="Pega el menú del día"></textarea>
+                <button type="submit" class="b-naranja">&#127937; Cargar para marcar resultados</button>
+            </form>
+            {% endif %}
             {% if resultados_picks %}
             <form action="/webhook-resultados" method="POST" style="margin-top:18px">
                 <div style="background:#1e3a8a;padding:8px 12px;border-radius:6px;font-weight:bold">&#127937; Resultados de la jornada</div>
@@ -2388,6 +2396,18 @@ def bot_conectar():
     if r["entregado"]:
         return render_panel(programado=f"Cobros activados: el bot ya recibe comprobantes ({url}).")
     return render_panel(detalle=f"No se pudo activar: {r['error']}", status=502)
+
+
+@app.route("/resultados-cargar", methods=["POST"])
+def cargar_para_resultados():
+    """Recupera la jornada (para marcar resultados) pegando otra vez el menu del dia."""
+    if not auth_ok():
+        return respuesta_no_autorizado()
+    texto = request.form.get("menu", "")
+    if not parsear_menu(texto)["hipodromos"]:
+        return render_panel(detalle="No encontré paradas en el menú pegado.", status=422)
+    guardar_jornada(texto, NOTA_HORARIOS)
+    return render_panel(programado="Jornada cargada: marca los resultados abajo ✅/❌.")
 
 
 @app.route("/webhook-resultados", methods=["POST"])
