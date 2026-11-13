@@ -85,9 +85,9 @@ USDT_RED = _env("USDT_RED") or "BSC (BEP20)"
 # Precio del ESPECIAL (sale entre parentesis en el menu y en la venta)
 VALOR_ESPECIAL = _env("VALOR_ESPECIAL") or "$4.99"
 # Precio de TODA la informacion del dia en el VIP (super promo)
-PRECIO_DIA = _env("PRECIO_DIA") or "$15.99"
+PRECIO_DIA = _env("PRECIO_DIA") or "$9.99"
 # Precio de todos los caballos de valor juntos (una sola promocion)
-PRECIO_VALORES = _env("PRECIO_VALORES") or "$9.99"
+PRECIO_VALORES = _env("PRECIO_VALORES") or "$4.99"
 # Rango de cuotas que se anuncia en la venta de los especiales de alto dividendo
 CUOTA_DESDE = _env("CUOTA_DESDE") or "5 a 1"
 CUOTA_HASTA = _env("CUOTA_HASTA") or "20 a 1"
@@ -1197,8 +1197,9 @@ def promo_vip(menu, precio_valores, precio_dia):
     """2) Super promo VIP: resumen de todo lo que trae el VIP hoy (sin ejemplares) + totales + QR."""
     dia = menu["dia"] or DIAS[ahora_local().weekday()]
     lineas, total, hay = [], 0, set()
+    n_free = sum(1 for h in menu["hipodromos"] for i in h["items"] if i.get("free"))
     for h in menu["hipodromos"]:
-        vip = [i for i in h["items"] if not i.get("free")]
+        vip = list(h["items"])  # todas las paradas del dia, incluidas las free
         if not vip:
             continue
         c = {k: sum(1 for i in vip if i["etiqueta"] == k) for k in ("VALOR", "BEST BET", "RATA DEL DÍA", "RATA FUERTE")}
@@ -1224,7 +1225,9 @@ def promo_vip(menu, precio_valores, precio_dia):
         "Entra al <b>VIP</b> y llévate <b>TODAS las paradas de hoy</b> detalladas "
         "(ejemplar, número, ML, jugada y reseña):\n\n"
         + "\n".join(lineas)
-        + f"\n\n\U0001F4E6 <b>{_cuenta(total, 'parada', 'paradas')} en total</b>\n\n"
+        + f"\n\n\U0001F4E6 <b>{_cuenta(total, 'parada', 'paradas')} en total</b>"
+        + (f" (incluye {'la parada free' if n_free == 1 else 'las ' + str(n_free) + ' paradas free'})" if n_free else "")
+        + "\n\n"
         + (f"\U0001F48E\U0001F4B0 <b>Solo los {n_valores} ESPECIALES DE ALTO DIVIDENDO: {esc(precio_valores)}</b>\n"
            "      (alto dividendo · parada larga)\n" if n_valores > 1 else
            (f"\U0001F48E\U0001F4B0 <b>Solo el ESPECIAL DE ALTO DIVIDENDO: {esc(precio_valores)}</b>\n" if n_valores else ""))
