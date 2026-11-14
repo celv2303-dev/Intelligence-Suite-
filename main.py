@@ -936,6 +936,35 @@ _RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*(?:\(\s*(\d+\s*[/-]\s*\d+)\s*\
 _RE_PICK_SIN_ML = _re.compile(r"#\s*(\d+)\s+([^\t✖💰★⭐]+?)\s*(?:\t|\s{2,}|(?=[✖💰★⭐]))\s*(.*)$")
 
 
+def _resenas_en_bloque(texto, hipodromos):
+    """Bloque de reseñas al final del menu:
+        💰 BELMONT · C6 · 2:10 ET (3:10 Caracas)
+        #11 WOW WHATA PARTY · ML 20/1
+        texto de la reseña...
+    Se asigna al VALOR de ese hipodromo, carrera y numero."""
+    lineas = (texto or "").splitlines()
+    k = 0
+    while k < len(lineas):
+        cab = _re.match(r"^\s*\U0001F4B0\s*(.+?)\s*·\s*C\s*(\d+)\b", lineas[k])
+        if cab and k + 1 < len(lineas):
+            num = _re.match(r"^\s*#\s*(\d+)\b", lineas[k + 1])
+            if num:
+                cuerpo, j = [], k + 2
+                while j < len(lineas) and lineas[j].strip() and not _re.match(r"^\s*(\U0001F4B0|\U0001F510|\u23F0|#\s*\d)", lineas[j]):
+                    cuerpo.append(lineas[j].strip())
+                    j += 1
+                hip = _sin_acentos(cab.group(1)).strip()
+                for h in hipodromos:
+                    hn = _sin_acentos(h["nombre"])
+                    if hip in hn or hn in hip:
+                        for it in h["items"]:
+                            if it["etiqueta"] == "VALOR" and it["carrera"] == cab.group(2) and it["numero"] == num.group(1):
+                                it["resena"] = " ".join(cuerpo)
+                k = j
+                continue
+        k += 1
+
+
 def _quitar_etiqueta(t):
     """Quita la etiqueta del texto de la jugada ('✖ RATA DEL DÍA pago dar...' -> 'pago dar...')."""
     t = _re.sub(r"(?i)[✖💰★⭐\s]*(RATAS? DEL D[IÍ]A|RATAS? FUERT\w*|VALOR DEL D[IÍ]A|VALOR|BEST BET)\b", " ", t or "")
@@ -1024,6 +1053,9 @@ def parsear_menu(texto):
                 continue
         plano = plano.lstrip("\U0001F510\U0001F512 ").strip()
         linea = _re.sub(r"^[\U0001F510\U0001F512\s]+", "", linea)
+        if "PARA COPIAR" in plano or "RESENAS VIP" in plano:
+            ultimo = None  # empieza el bloque de reseñas al final: se procesa aparte
+            continue
         if ultimo is not None and plano.startswith("RESENA"):
             if ultimo["etiqueta"] == "VALOR":
                 ultimo["resena"] = (ultimo["resena"] + " " + _re.sub(r"(?i)^rese[ñn]a\s*(vip)?\s*:?\s*", "", linea)).strip()
@@ -1066,6 +1098,7 @@ def parsear_menu(texto):
             actual["items"].append(ultimo)
         elif not nueva and not m and ultimo is not None and ultimo["etiqueta"] == "VALOR" and "HOY NO HAY" not in plano:
             ultimo["resena"] = (ultimo["resena"] + " " + linea).strip()
+    _resenas_en_bloque(texto, hipodromos)
     # Si un ejemplar es RATA DEL DIA y RATA FUERTE a la vez, queda solo como RATA FUERTE
     for h in hipodromos:
         fuertes = {(i["carrera"], i["numero"]) for i in h["items"] if i["etiqueta"] == "RATA FUERTE"}
