@@ -89,6 +89,14 @@ VALOR_ESPECIAL = _env("VALOR_ESPECIAL") or "$4.99"
 PRECIO_DIA = _env("PRECIO_DIA") or "$9.99"
 # Precio de todos los caballos de valor juntos (una sola promocion)
 PRECIO_VALORES = _env("PRECIO_VALORES") or "$4.99"
+# Plan semanal: varios dias seguidos de VIP (jueves a domingo = 4 dias) y plan premium (lo mismo
+# mas atencion personalizada carrera a carrera con notas de voz)
+PRECIO_SEMANAL = _env("PRECIO_SEMANAL") or "$30"
+PRECIO_PREMIUM = _env("PRECIO_PREMIUM") or "$50"
+try:
+    DIAS_SEMANAL = max(2, int(_env("DIAS_SEMANAL") or 4))
+except ValueError:
+    DIAS_SEMANAL = 4
 # Rango de cuotas que se anuncia en la venta de los especiales de alto dividendo
 CUOTA_DESDE = _env("CUOTA_DESDE") or "5 a 1"
 CUOTA_HASTA = _env("CUOTA_HASTA") or "20 a 1"
@@ -2240,6 +2248,19 @@ def calcular_vencimiento(ahora_loc=None):
                                      tzinfo=ahora_loc.tzinfo)
 
 
+# Tipos de acceso al VIP: dia (1 dia), sem (plan semanal), pre (plan premium)
+def _dias_plan(tipo):
+    return DIAS_SEMANAL if tipo in ("sem", "pre") else 1
+
+
+def _nombre_plan(tipo):
+    return {"sem": "PLAN SEMANAL", "pre": "PLAN PREMIUM"}.get(tipo, "VIP del día")
+
+
+def _precio_plan(tipo):
+    return {"sem": PRECIO_SEMANAL, "pre": PRECIO_PREMIUM}.get(tipo, PRECIO_DIA)
+
+
 def _dm(chat_id, texto, **kw):
     return enviar_a_chat(chat_id, texto, **kw)
 
@@ -2252,6 +2273,9 @@ def texto_bienvenida():
     return (
         f"\U0001F44B <b>Bienvenido a {esc(CANAL_NOMBRE)}</b>\n\n"
         f"\U0001F512 <b>VIP · todas las paradas del día: {esc(PRECIO_DIA)}</b>\n"
+        f"\U0001F4C5 <b>Plan SEMANAL · {DIAS_SEMANAL} días seguidos de VIP: {esc(PRECIO_SEMANAL)}</b>\n"
+        f"\U0001F451 <b>Plan PREMIUM · {DIAS_SEMANAL} días + atención personalizada carrera a carrera, "
+        f"notas de voz y paradas de último momento: {esc(PRECIO_PREMIUM)}</b>\n"
         f"\U0001F48E\U0001F4B0 <b>Especiales de ALTO DIVIDENDO: {esc(PRECIO_VALORES)}</b>\n\n"
         "1\uFE0F\u20E3 Paga por cualquiera de estas dos vías:\n"
         + metodos_pago_html() + "\n"
@@ -2264,6 +2288,8 @@ def texto_bienvenida():
 def _botones_aprobar(uid):
     return {"inline_keyboard": [
         [{"text": f"\u2705 Aprobar VIP {PRECIO_DIA}", "callback_data": f"a|vip|{uid}"}],
+        [{"text": f"\U0001F4C5 Aprobar Semanal {PRECIO_SEMANAL} ({DIAS_SEMANAL} días)", "callback_data": f"a|sem|{uid}"}],
+        [{"text": f"\U0001F451 Aprobar Premium {PRECIO_PREMIUM} ({DIAS_SEMANAL} días)", "callback_data": f"a|pre|{uid}"}],
         [{"text": f"\u2705 Aprobar Especiales {PRECIO_VALORES}", "callback_data": f"a|esp|{uid}"}],
         [{"text": "\u274C Rechazar", "callback_data": f"a|no|{uid}"}],
     ]}
@@ -2304,7 +2330,11 @@ def manejar_mensaje_privado(msg):
     alias = f" (@{usuario['username']})" if usuario.get("username") else ""
     activos = [a for a in _leer_accesos() if str(a["uid"]) == str(uid) and not a.get("expulsado")
                and a["plan"] == "vip"]
-    nota = "\n\U0001F501 <b>Ya tiene VIP activo</b>: aprobar VIP = renovar 1 día más." if activos else ""
+    nota = ""
+    if activos:
+        hasta = a_local(datetime.datetime.fromisoformat(activos[0]["vence"])).strftime('%d/%m %I:%M %p')
+        nota = (f"\n\U0001F501 <b>Ya tiene {_nombre_plan(activos[0].get('tipo'))} activo hasta el {hasta}</b>: "
+                f"aprobar VIP suma 1 día; Semanal o Premium suman {DIAS_SEMANAL} días.")
     llamar_telegram("sendMessage", {
         "chat_id": ADMIN_CHAT_ID, "parse_mode": "HTML",
         "text": f"\U0001F4E9 <b>Comprobante</b> de {esc(nombre)}{esc(alias)}\nID: <code>{uid}</code>{nota}\n\n"
@@ -2345,32 +2375,44 @@ def entregar_especiales_pendientes():
         _guardar_accesos(lista)
 
 
-def aprobar_vip(uid, nombre):
+def aprobar_vip(uid, nombre, tipo="dia"):
     lista = _leer_accesos()
+    dias = _dias_plan(tipo)
+    plan = _nombre_plan(tipo)
+    extra = ""
+    if tipo == "pre":
+        extra = ("\n\n\U0001F451 <b>Eres PREMIUM</b>: te atendemos por aquí mismo, carrera a carrera, con notas de voz, "
+                 "análisis más completo y las paradas de último momento.")
     activo = next((a for a in lista if str(a["uid"]) == str(uid) and a["plan"] == "vip" and not a.get("expulsado")), None)
-    if activo:  # renovacion: un dia mas, sin link nuevo
-        vence = datetime.datetime.fromisoformat(activo["vence"]) + datetime.timedelta(days=1)
+    if activo:  # renovacion: se suman los dias del plan, sin link nuevo
+        vence = datetime.datetime.fromisoformat(activo["vence"]) + datetime.timedelta(days=dias)
         activo.update(vence=vence.isoformat(), avisado=False)
+        if tipo != "dia" or activo.get("tipo") != "pre":
+            activo["tipo"] = tipo  # un dia suelto no le quita el premium a quien ya lo tiene
         _guardar_accesos(lista)
         _dm(uid, f"\u2705 <b>¡Renovado!</b> Sigues en el VIP de {esc(CANAL_NOMBRE)} hasta el "
-                 f"{a_local(vence).strftime('%d/%m %I:%M %p')}. ¡A ganar! \U0001F4AA")
-        return f"VIP renovado hasta {a_local(vence).strftime('%d/%m %I:%M %p')}"
-    vence = calcular_vencimiento()
+                 f"{a_local(vence).strftime('%d/%m %I:%M %p')}. ¡A ganar! \U0001F4AA" + extra)
+        return f"{plan} renovado hasta {a_local(vence).strftime('%d/%m %I:%M %p')}"
+    vence = calcular_vencimiento() + datetime.timedelta(days=dias - 1)
     res = llamar_telegram("createChatInviteLink", {
         "chat_id": CHAT_ID_VIP, "name": f"CTV-{uid}"[:32], "member_limit": 1,
         "expire_date": int(vence.timestamp())})
     link = (res.get("resultado") or {}).get("invite_link") if res["entregado"] else None
     if not link:
         return f"NO se pudo crear el link: {res['error']} (¿el bot es admin del VIP con permiso de invitar?)"
-    lista.append({"uid": uid, "nombre": nombre, "plan": "vip", "creado": ahora_local().isoformat(),
+    lista.append({"uid": uid, "nombre": nombre, "plan": "vip", "tipo": tipo, "creado": ahora_local().isoformat(),
                   "vence": vence.isoformat(), "link": link, "miembro": None, "avisado": False, "expulsado": False})
     _guardar_accesos(lista)
+    if tipo == "dia":
+        detalle = "Ahí tienes TODAS las paradas de hoy detalladas."
+    else:
+        detalle = f"Tienes <b>{plan}</b>: TODAS las paradas detalladas durante {dias} días seguidos."
     _dm(uid, f"\u2705 <b>¡Pago confirmado!</b>\n\nBienvenido al <b>VIP de {esc(CANAL_NOMBRE)}</b>. "
-             "Ahí tienes TODAS las paradas de hoy detalladas.\n\n"
+             f"{detalle}{extra}\n\n"
              f"\U0001F449 Entra aquí (link para 1 sola persona):\n{link}\n\n"
              f"\u23F0 Tu acceso es válido hasta el {a_local(vence).strftime('%d/%m %I:%M %p')}.",
         reply_markup={"inline_keyboard": [[{"text": "\U0001F512 Entrar al VIP", "url": link}]]})
-    return f"VIP aprobado hasta {a_local(vence).strftime('%d/%m %I:%M %p')}"
+    return f"{plan} aprobado hasta {a_local(vence).strftime('%d/%m %I:%M %p')}"
 
 
 def aprobar_especiales(uid, nombre):
@@ -2399,8 +2441,8 @@ def manejar_boton(cb):
     except ValueError:
         return
     nombre = (msg.get("text") or "").split("\n")[0].replace("\U0001F4E9 Comprobante de ", "")[:60]
-    if accion == "vip":
-        resultado = aprobar_vip(int(uid), nombre)
+    if accion in ("vip", "sem", "pre"):
+        resultado = aprobar_vip(int(uid), nombre, {"vip": "dia"}.get(accion, accion))
     elif accion == "esp":
         resultado = aprobar_especiales(int(uid), nombre)
     else:
@@ -2458,8 +2500,14 @@ def procesar_accesos():
         if not a.get("avisado") and aviso <= ahora < vence:
             foto, foto_url = qr_binance()
             _dm(a["uid"], f"\u23F0 <b>Tu acceso VIP vence el {a_local(vence).strftime('%d/%m')} a las {a_local(vence).strftime('%I:%M %p').lstrip('0')}</b>\n\n"
-                          f"¿Seguimos mañana? Renueva por <b>{esc(PRECIO_DIA)}</b> y recibe TODAS las paradas del día "
-                          "(especiales de alto dividendo, ratas y best bets).\n\n"
+                          + (f"¿Seguimos? Renueva tu <b>{_nombre_plan(a.get('tipo'))}</b> por "
+                             f"<b>{esc(_precio_plan(a.get('tipo')))}</b> y sigue {DIAS_SEMANAL} días más con TODAS las paradas "
+                             "(especiales de alto dividendo, ratas y best bets).\n\n"
+                             if a.get("tipo") in ("sem", "pre") else
+                             f"¿Seguimos mañana? Renueva por <b>{esc(PRECIO_DIA)}</b> y recibe TODAS las paradas del día "
+                             "(especiales de alto dividendo, ratas y best bets).\n"
+                             f"\U0001F4C5 O asegura {DIAS_SEMANAL} días seguidos con el <b>plan semanal por "
+                             f"{esc(PRECIO_SEMANAL)}</b> (te ahorras frente al día a día).\n\n")
                           + metodos_pago_html() + "\n\n"
                           "Manda aquí tu comprobante y sigues dentro sin perder nada \U0001F4AA",
                 foto=foto, foto_url=foto_url)
@@ -2473,8 +2521,9 @@ def procesar_accesos():
                 llamar_telegram("unbanChatMember", {"chat_id": CHAT_ID_VIP, "user_id": quien, "only_if_banned": True})
             if a.get("link"):
                 llamar_telegram("revokeChatInviteLink", {"chat_id": CHAT_ID_VIP, "invite_link": a["link"]})
-            _dm(a["uid"], f"\U0001F44B Tu acceso de hoy al VIP terminó. Cuando quieras volver, escríbenos aquí: "
-                          f"todas las paradas del día por <b>{esc(PRECIO_DIA)}</b>.")
+            _dm(a["uid"], f"\U0001F44B Tu acceso al VIP terminó. Cuando quieras volver, escríbenos aquí: "
+                          f"todas las paradas del día por <b>{esc(PRECIO_DIA)}</b> o {DIAS_SEMANAL} días seguidos "
+                          f"con el plan semanal por <b>{esc(PRECIO_SEMANAL)}</b>.")
             a["expulsado"] = True
             cambio = True
     if cambio:
@@ -2489,7 +2538,7 @@ def accesos_para_panel():
     for a in _leer_accesos():
         if a["plan"] == "vip":
             estado = "terminado" if a.get("expulsado") else "activo"
-            det = f"VIP hasta {a_local(datetime.datetime.fromisoformat(a['vence'])).strftime('%d/%m %I:%M %p')}"
+            det = f"{_nombre_plan(a.get('tipo'))} hasta {a_local(datetime.datetime.fromisoformat(a['vence'])).strftime('%d/%m %I:%M %p')}"
         else:
             estado = "entregado" if a.get("entregado") else "pendiente"
             det = f"Especiales del {a.get('fecha')}"
