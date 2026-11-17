@@ -97,6 +97,10 @@ try:
     DIAS_SEMANAL = max(2, int(_env("DIAS_SEMANAL") or 4))
 except ValueError:
     DIAS_SEMANAL = 4
+# Dias en que hay carreras: el acceso al VIP solo cuenta estos dias (los demas no se descuentan)
+_DIAS_SEMANA = {"lun": 0, "mar": 1, "mie": 2, "mié": 2, "jue": 3, "vie": 4, "sab": 5, "sáb": 5, "dom": 6}
+DIAS_CARRERA = {_DIAS_SEMANA[d.strip().lower()[:3]] for d in (_env("DIAS_CARRERA") or "jue,vie,sab,dom").split(",")
+                if d.strip().lower()[:3] in _DIAS_SEMANA} or {3, 4, 5, 6}
 # Rango de cuotas que se anuncia en la venta de los especiales de alto dividendo
 CUOTA_DESDE = _env("CUOTA_DESDE") or "5 a 1"
 CUOTA_HASTA = _env("CUOTA_HASTA") or "20 a 1"
@@ -2240,12 +2244,25 @@ def _hora(hhmm):
         return datetime.time(5, 0)
 
 
-def calcular_vencimiento(ahora_loc=None):
-    """Acceso de 1 dia: vence a HORA_VENCE del dia siguiente (si paga de noche, del subsiguiente)."""
+def _ultima_jornada(desde, jornadas):
+    """Fecha del ultimo dia de carreras contando `jornadas` dias de carrera a partir de `desde` (incluido)."""
+    dia = desde
+    while True:
+        if dia.weekday() in DIAS_CARRERA:
+            jornadas -= 1
+            if jornadas <= 0:
+                return dia
+        dia += datetime.timedelta(days=1)
+
+
+def calcular_vencimiento(ahora_loc=None, jornadas=1, desde=None):
+    """El acceso cubre `jornadas` dias de carrera (los dias sin carreras no cuentan) y vence a HORA_VENCE
+    del dia siguiente al ultimo. Se cuenta desde hoy (desde manana si paga de noche) o desde `desde`."""
     ahora_loc = ahora_loc or ahora_local()
-    dias = 2 if ahora_loc.hour >= 20 else 1
-    return datetime.datetime.combine(ahora_loc.date() + datetime.timedelta(days=dias), _hora(HORA_VENCE),
-                                     tzinfo=ahora_loc.tzinfo)
+    if desde is None:
+        desde = ahora_loc.date() + datetime.timedelta(days=1 if ahora_loc.hour >= 20 else 0)
+    ultimo = _ultima_jornada(desde, jornadas)
+    return datetime.datetime.combine(ultimo + datetime.timedelta(days=1), _hora(HORA_VENCE), tzinfo=ahora_loc.tzinfo)
 
 
 # Tipos de acceso al VIP: dia (1 dia), sem (plan semanal), pre (plan premium)
@@ -2273,7 +2290,7 @@ def texto_bienvenida():
     return (
         f"\U0001F44B <b>Bienvenido a {esc(CANAL_NOMBRE)}</b>\n\n"
         f"\U0001F512 <b>VIP · todas las paradas del día: {esc(PRECIO_DIA)}</b>\n"
-        f"\U0001F4C5 <b>Plan SEMANAL · {DIAS_SEMANAL} días seguidos de VIP: {esc(PRECIO_SEMANAL)}</b>\n"
+        f"\U0001F4C5 <b>Plan SEMANAL · {DIAS_SEMANAL} días de carreras en el VIP: {esc(PRECIO_SEMANAL)}</b>\n"
         f"\U0001F451 <b>Plan PREMIUM · {DIAS_SEMANAL} días + atención personalizada carrera a carrera, "
         f"notas de voz y paradas de último momento: {esc(PRECIO_PREMIUM)}</b>\n"
         f"\U0001F48E\U0001F4B0 <b>Especiales de ALTO DIVIDENDO: {esc(PRECIO_VALORES)}</b>\n\n"
@@ -2385,7 +2402,8 @@ def aprobar_vip(uid, nombre, tipo="dia"):
                  "análisis más completo y las paradas de último momento.")
     activo = next((a for a in lista if str(a["uid"]) == str(uid) and a["plan"] == "vip" and not a.get("expulsado")), None)
     if activo:  # renovacion: se suman los dias del plan, sin link nuevo
-        vence = datetime.datetime.fromisoformat(activo["vence"]) + datetime.timedelta(days=dias)
+        # se suman dias de carrera a partir del dia en que hoy se le acaba
+        vence = calcular_vencimiento(jornadas=dias, desde=a_local(datetime.datetime.fromisoformat(activo["vence"])).date())
         activo.update(vence=vence.isoformat(), avisado=False)
         if tipo != "dia" or activo.get("tipo") != "pre":
             activo["tipo"] = tipo  # un dia suelto no le quita el premium a quien ya lo tiene
@@ -2393,7 +2411,7 @@ def aprobar_vip(uid, nombre, tipo="dia"):
         _dm(uid, f"\u2705 <b>¡Renovado!</b> Sigues en el VIP de {esc(CANAL_NOMBRE)} hasta el "
                  f"{a_local(vence).strftime('%d/%m %I:%M %p')}. ¡A ganar! \U0001F4AA" + extra)
         return f"{plan} renovado hasta {a_local(vence).strftime('%d/%m %I:%M %p')}"
-    vence = calcular_vencimiento() + datetime.timedelta(days=dias - 1)
+    vence = calcular_vencimiento(jornadas=dias)
     res = llamar_telegram("createChatInviteLink", {
         "chat_id": CHAT_ID_VIP, "name": f"CTV-{uid}"[:32], "member_limit": 1,
         "expire_date": int(vence.timestamp())})
@@ -2404,9 +2422,9 @@ def aprobar_vip(uid, nombre, tipo="dia"):
                   "vence": vence.isoformat(), "link": link, "miembro": None, "avisado": False, "expulsado": False})
     _guardar_accesos(lista)
     if tipo == "dia":
-        detalle = "Ahí tienes TODAS las paradas de hoy detalladas."
+        detalle = "Ahí tienes TODAS las paradas del día detalladas."
     else:
-        detalle = f"Tienes <b>{plan}</b>: TODAS las paradas detalladas durante {dias} días seguidos."
+        detalle = f"Tienes <b>{plan}</b>: TODAS las paradas detalladas durante {dias} días de carreras."
     _dm(uid, f"\u2705 <b>¡Pago confirmado!</b>\n\nBienvenido al <b>VIP de {esc(CANAL_NOMBRE)}</b>. "
              f"{detalle}{extra}\n\n"
              f"\U0001F449 Entra aquí (link para 1 sola persona):\n{link}\n\n"
@@ -2501,12 +2519,12 @@ def procesar_accesos():
             foto, foto_url = qr_binance()
             _dm(a["uid"], f"\u23F0 <b>Tu acceso VIP vence el {a_local(vence).strftime('%d/%m')} a las {a_local(vence).strftime('%I:%M %p').lstrip('0')}</b>\n\n"
                           + (f"¿Seguimos? Renueva tu <b>{_nombre_plan(a.get('tipo'))}</b> por "
-                             f"<b>{esc(_precio_plan(a.get('tipo')))}</b> y sigue {DIAS_SEMANAL} días más con TODAS las paradas "
+                             f"<b>{esc(_precio_plan(a.get('tipo')))}</b> y sigue {DIAS_SEMANAL} días de carreras más con TODAS las paradas "
                              "(especiales de alto dividendo, ratas y best bets).\n\n"
                              if a.get("tipo") in ("sem", "pre") else
                              f"¿Seguimos mañana? Renueva por <b>{esc(PRECIO_DIA)}</b> y recibe TODAS las paradas del día "
                              "(especiales de alto dividendo, ratas y best bets).\n"
-                             f"\U0001F4C5 O asegura {DIAS_SEMANAL} días seguidos con el <b>plan semanal por "
+                             f"\U0001F4C5 O asegura {DIAS_SEMANAL} días de carreras con el <b>plan semanal por "
                              f"{esc(PRECIO_SEMANAL)}</b> (te ahorras frente al día a día).\n\n")
                           + metodos_pago_html() + "\n\n"
                           "Manda aquí tu comprobante y sigues dentro sin perder nada \U0001F4AA",
@@ -2522,7 +2540,7 @@ def procesar_accesos():
             if a.get("link"):
                 llamar_telegram("revokeChatInviteLink", {"chat_id": CHAT_ID_VIP, "invite_link": a["link"]})
             _dm(a["uid"], f"\U0001F44B Tu acceso al VIP terminó. Cuando quieras volver, escríbenos aquí: "
-                          f"todas las paradas del día por <b>{esc(PRECIO_DIA)}</b> o {DIAS_SEMANAL} días seguidos "
+                          f"todas las paradas del día por <b>{esc(PRECIO_DIA)}</b> o {DIAS_SEMANAL} días de carreras "
                           f"con el plan semanal por <b>{esc(PRECIO_SEMANAL)}</b>.")
             a["expulsado"] = True
             cambio = True
