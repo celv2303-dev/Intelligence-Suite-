@@ -91,8 +91,8 @@ PRECIO_DIA = _env("PRECIO_DIA") or "$9.99"
 PRECIO_VALORES = _env("PRECIO_VALORES") or "$4.99"
 # Plan semanal: varios dias seguidos de VIP (jueves a domingo = 4 dias) y plan premium (lo mismo
 # mas atencion personalizada carrera a carrera con notas de voz)
-PRECIO_SEMANAL = _env("PRECIO_SEMANAL") or "$30"
-PRECIO_PREMIUM = _env("PRECIO_PREMIUM") or "$50"
+PRECIO_SEMANAL = _env("PRECIO_SEMANAL") or "$29.99"
+PRECIO_PREMIUM = _env("PRECIO_PREMIUM") or "$49.99"
 try:
     DIAS_SEMANAL = max(2, int(_env("DIAS_SEMANAL") or 4))
 except ValueError:
@@ -178,6 +178,20 @@ DIAS = ["LUNES", "MARTES", "MIÉRCOLES", "JUEVES", "VIERNES", "SÁBADO", "DOMING
 # TEXTOS DE VENTA (copiados del modelo; {oferta} {monto} {link} se rellenan)
 # ==========================================
 PLANTILLAS_VENTA = {
+    "planes": {
+        "nombre": "🔥 Planes CORRIDATV (todos los precios + QR)",
+        "texto": (
+            "🔥<b>PLANES {canal}</b>🔥\n\n"
+            "🎁 <b>VIP DEL DÍA</b> · todas las paradas del día: <b>{precio_dia}</b>\n"
+            "💎💰 <b>ESPECIALES DE ALTO DIVIDENDO</b> · parada larga: <b>{precio_valores}</b>\n"
+            "📅 <b>PLAN SEMANAL</b> · {dias} días de carreras en el VIP: <b>{precio_semanal}</b>\n"
+            "👑 <b>PLAN PREMIUM</b> · {dias} días + atención personalizada carrera a carrera, "
+            "notas de voz y paradas de último momento: <b>{precio_premium}</b>\n\n"
+            "👉<b>PLAZAS MUY LIMITADAS!</b>🎟\n\n"
+            "{link}"
+            "<b>ESTO NO ES CORAZONADA</b> ✅"
+        ),
+    },
     "especial": {
         "nombre": "🌟 ESPECIAL del día (con QR)",
         "texto": (
@@ -1806,6 +1820,8 @@ def mensaje_venta(clave, oferta, monto, contacto, texto_libre, resena=""):
         canal=esc(CANAL_NOMBRE),
         oferta=esc(oferta),
         texto_libre=esc(texto_libre),
+        precio_dia=esc(PRECIO_DIA), precio_valores=esc(PRECIO_VALORES), precio_semanal=esc(PRECIO_SEMANAL),
+        precio_premium=esc(PRECIO_PREMIUM), dias=DIAS_SEMANAL,
         linea_resena=(f"\U0001F4DD <i>{esc(resena)}</i>\n\n" if resena else ""),
     ), url
 
@@ -2882,7 +2898,7 @@ def recibir_venta():
     if "qr_form" in datos or "con_qr" in datos:   # el panel siempre manda qr_form
         con_qr = marcado(datos, "con_qr")
     else:
-        con_qr = clave in ("especial", "principal", "pago")
+        con_qr = clave in ("planes", "especial", "principal", "pago")
     if con_qr:
         foto, foto_url = qr_binance()
         if not (foto or foto_url):
