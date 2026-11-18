@@ -1209,6 +1209,13 @@ def picks_menu(menu):
     return salida
 
 
+def lineas_planes():
+    """Plan semanal y premium para las promos del grupo gratis."""
+    return (f"\U0001F4C5 <b>PLAN SEMANAL · {DIAS_SEMANAL} días de carreras: {esc(PRECIO_SEMANAL)}</b>\n"
+            f"\U0001F451 <b>PLAN PREMIUM · {DIAS_SEMANAL} días + atención personalizada carrera a carrera "
+            f"con notas de voz: {esc(PRECIO_PREMIUM)}</b>")
+
+
 def alerta_free(pick):
     """3) Alerta llamativa de la PARADA FREE (estilo NUEVO PRONOSTICO)."""
     return (
@@ -1218,7 +1225,8 @@ def alerta_free(pick):
         "━━━━━━━━━━━━━━━━\n"
         + pick["texto"]
         + "\n━━━━━━━━━━━━━━━━\n"
-        f"\U0001F525 ¿Quieres TODAS las paradas de hoy? <b>VIP {esc(PRECIO_DIA)}</b>"
+        f"\U0001F525 ¿Quieres TODAS las paradas de hoy? <b>VIP {esc(PRECIO_DIA)}</b> · "
+        f"<b>Semanal {esc(PRECIO_SEMANAL)}</b> · <b>Premium {esc(PRECIO_PREMIUM)}</b>"
     )
 
 
@@ -1299,6 +1307,7 @@ def promo_vip(menu, precio_valores, precio_dia):
            "      (alto dividendo · parada larga)\n" if n_valores > 1 else
            (f"\U0001F48E\U0001F4B0 <b>Solo el ESPECIAL DE ALTO DIVIDENDO: {esc(precio_valores)}</b>\n" if n_valores else ""))
         + f"\U0001F381 <b>TODO EL DÍA POR SOLO {esc(precio_dia)}</b>" + (f" ({incluye})" if incluye else "")
+        + "\n" + lineas_planes()
         + "\n\n\U0001F449<b>PLAZAS MUY LIMITADAS!</b>\U0001F39F\n\n"
         + _bloque_pago()
         + "\n\n<b>ESTO NO ES CORAZONADA</b> ✅"
@@ -1362,7 +1371,8 @@ def ultimo_llamado_valores(menu, precio_valores, minutos):
         f"({esc(vals[0][0]['nombre'])}, C{esc(vals[0][1]['carrera'])}).\n\n"
         f"\U0001F48E\U0001F4B0 <b>{_cuenta(len(vals), 'ejemplar', 'ejemplares')} de ALTO DIVIDENDO · PARADA LARGA "
         f"por {esc(precio_valores)}</b>\n"
-        f"\U0001F381 O todo el día en el VIP por <b>{esc(PRECIO_DIA)}</b>\n\n"
+        f"\U0001F381 O todo el día en el VIP por <b>{esc(PRECIO_DIA)}</b>\n"
+        f"\U0001F4C5 O la semana completa ({DIAS_SEMANAL} días de carreras) por <b>{esc(PRECIO_SEMANAL)}</b>\n\n"
         + _bloque_pago()
     )
 
@@ -1433,7 +1443,11 @@ def festejo(p, pago="", cta=True):
         texto += f"\n\n\U0001F4B0 <b>PAGÓ {esc(pago)}</b>"
     texto += "\n\n<b>¡SEGUIMOS TRABAJANDO!</b> \U0001F4AA"
     if not free and cta:
-        texto += f"\n\n\U0001F512 Esta iba en el VIP. Mañana entra: <b>todo el día por {esc(PRECIO_DIA)}</b>"
+        texto += (f"\n\n\U0001F512 Esta iba en el VIP. Mañana entra: <b>todo el día por {esc(PRECIO_DIA)}</b>\n"
+                  f"\U0001F4C5 O asegura {DIAS_SEMANAL} días de carreras con el <b>plan semanal por {esc(PRECIO_SEMANAL)}</b>")
+    elif cta:
+        texto += (f"\n\n\U0001F525 ¿Quieres TODAS las paradas? <b>VIP {esc(PRECIO_DIA)}</b> · "
+                  f"<b>Semanal {esc(PRECIO_SEMANAL)}</b> · <b>Premium {esc(PRECIO_PREMIUM)}</b>")
     return texto
 
 
@@ -1463,7 +1477,8 @@ def resumen_resultados(menu, marcados):
         f"\U0001F4CA <b>RESULTADOS CORRIDATV · {dia}</b>\n\n"
         + "\n".join(lineas)
         + f"\n\n<b>\u2705 {g} {'acierto' if g == 1 else 'aciertos'} · \u274C {perd}</b>\n\n"
-        + f"\U0001F512 Mañana todas las paradas en el VIP por <b>{esc(PRECIO_DIA)}</b>\n\n"
+        + f"\U0001F512 Mañana todas las paradas en el VIP por <b>{esc(PRECIO_DIA)}</b>\n"
+        + lineas_planes() + "\n\n"
         + firma_html()
     )
 _cola_lock = _threading.Lock()
