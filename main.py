@@ -991,6 +991,11 @@ def _resenas_en_bloque(texto, hipodromos):
         k += 1
 
 
+_RE_LINEA_ET = _re.compile(
+    r"(\d{1,2}:\d{2})\s*([AaPp]\.?\s*[Mm]\.?)?\s*ET\b.*?·\s*C\s*(\d+)\s*·\s*#\s*(\d+)\s+(.+?)\s*·\s*ML\s*"
+    r"(\d+\s*[/-]\s*\d+)?\s*(.*)$")
+
+
 def _quitar_etiqueta(t):
     """Quita la etiqueta del texto de la jugada ('✖ RATA DEL DÍA pago dar...' -> 'pago dar...')."""
     t = _re.sub(r"(?i)[✖💰★⭐\s]*(RATAS? DEL D[IÍ]A|RATAS? FUERT\w*|VALOR DEL D[IÍ]A|VALOR|BEST BET)\b", " ", t or "")
@@ -1037,6 +1042,33 @@ def parsear_menu(texto):
         if not linea:
             continue
         plano = _sin_acentos(linea)
+        # Encabezado de hipodromo: "PARADAS · CHURCHILL DOWNS" (sin dia de la semana)
+        mh = _re.match(r"^\s*(?:\U0001F3C7\s*)?PARADAS\s*[·:\-]\s*(.+)$", plano)
+        if mh and not any(d in mh.group(1) for d in ("LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO")):
+            nombre_h = _re.sub(r"^\s*(?:\U0001F3C7\s*)?PARADAS\s*[·:\-]\s*", "", linea, flags=_re.I).strip()
+            nombre_h = _re.sub(r"[^\w\s'.&-]", "", nombre_h).strip().title()
+            actual = next((h for h in hipodromos if h["nombre"].lower() == nombre_h.lower()), None)
+            if actual is None:
+                actual = {"nombre": nombre_h, "items": []}
+                hipodromos.append(actual)
+            etiqueta, ultimo = None, None
+            continue
+        # Linea de parada: "💰 VALOR DEL DÍA: 1:29 ET (2:29 Caracas) · C2 · #6 Bullet Baby · ML 6/1 jugar 4 puesto"
+        ml_ = _RE_LINEA_ET.search(linea)
+        if ml_ and actual is not None:
+            etq = _etiqueta_de(_sin_acentos(linea[:ml_.start()]))
+            if etq:
+                hhmm, ampm, carrera, numero, caballo, ml, resto = ml_.groups()
+                ultimo = {"etiqueta": etq, "hora": _hora_fila(hhmm, ampm), "carrera": carrera, "numero": numero,
+                          "caballo": caballo.strip(" ·"), "ml": (ml or "").replace(" ", ""),
+                          "tipo": _quitar_etiqueta(resto), "resena": ""}
+                mfree = _re.search(r"parada\s*free\s*(\d*)", ultimo["tipo"], _re.I)
+                if mfree:
+                    ultimo["free"] = mfree.group(1) or str(1 + sum(1 for hh in hipodromos for it in hh["items"] if it.get("free")))
+                    ultimo["tipo"] = _re.sub(r"parada\s*free\s*\d*", "", ultimo["tipo"], flags=_re.I).strip(" ·-|:,\t")
+                actual["items"].append(ultimo)
+                etiqueta = etq
+                continue
         if dia is None and ("ETIQUETAS" in plano or "PARADAS" in plano) and not _RE_FILA.match(linea):
             for k, v in _DIAS_TXT.items():
                 if k.upper() in plano:
