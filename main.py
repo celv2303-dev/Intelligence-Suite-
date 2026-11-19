@@ -770,6 +770,8 @@ def info_etiqueta(etiqueta):
         return {"nombre": etiqueta, "destino": "vip", "emoji": "\U0001F400"}
     if "BEST BET" in e:
         return {"nombre": etiqueta, "destino": "vip", "emoji": "\U0001F3C6"}
+    if "LIVE" in e:
+        return {"nombre": etiqueta, "destino": "vip", "emoji": "\U0001F3A5"}
     if "STAKAZO" in e:
         return {"nombre": etiqueta, "destino": "vip", "emoji": "\U0001F48E"}
     return {"nombre": etiqueta, "destino": "vip", "emoji": "\U0001F3AF"}
@@ -959,7 +961,20 @@ _RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*(?:\(\s*(\d+\s*[/-]\s*\d+)\s*\
 
 
 # Ejemplar sin ML: "#4 Mad Banker<TAB>💰 VALOR jugamos..." (el nombre termina en tab, doble espacio o la etiqueta)
-_RE_PICK_SIN_ML = _re.compile(r"#\s*(\d+)\s+([^\t✖💰★⭐]+?)\s*(?:\t|\s{2,}|(?=[✖💰★⭐]))\s*(.*)$")
+_RE_PICK_SIN_ML = _re.compile(
+    r"#\s*(\d+)\s+([^\t✖💰★⭐🎥]+?)\s*(?:\t|\s{2,}|(?=[✖💰★⭐🎥])|"
+    r"(?=(?:dar[eé]?|daremos|damos|jug\w*|vamos|parada\s*free)\b)|$)\s*(.*)$", _re.I)
+
+# Codigos de hipodromo (Equibase)
+HIPODROMOS_COD = {
+    "BEL": "Belmont", "AQU": "Aqueduct", "SAR": "Saratoga", "CD": "Churchill Downs", "KEE": "Keeneland",
+    "GP": "Gulfstream", "GPW": "Gulfstream", "FG": "Fair Grounds", "SA": "Santa Anita", "DMR": "Del Mar",
+    "OP": "Oaklawn", "TAM": "Tampa Bay", "LRL": "Laurel", "PRX": "Parx", "CT": "Charles Town", "PEN": "Penn National",
+    "MVR": "Mahoning Valley", "TP": "Turfway", "WO": "Woodbine", "DED": "Delta Downs", "RP": "Remington",
+    "LS": "Lone Star", "HAW": "Hawthorne", "IND": "Indiana Grand", "ELP": "Ellis Park", "PID": "Presque Isle",
+    "MTH": "Monmouth", "DEL": "Delaware", "CNL": "Colonial", "EVD": "Evangeline", "LAD": "Louisiana Downs",
+    "GG": "Golden Gate", "LA": "Los Alamitos", "AP": "Arlington", "CBY": "Canterbury", "EMD": "Emerald Downs",
+}
 
 
 def _resenas_en_bloque(texto, hipodromos):
@@ -1013,12 +1028,20 @@ def _hora_fila(hhmm, ampm):
 def _etiqueta_de(plano):
     if "BEST BET" in plano:
         return "BEST BET"
-    if "RATA" in plano and "FUERT" in plano:   # acepta "FUERT" mal escrito
+    if ("RATA" in plano and "FUERT" in plano) or _re.search(r"(^|[\s✖·])RF\b", plano):   # "FUERT" mal escrito y "RF"
         return "RATA FUERTE"
     if "RATA" in plano:
         return "RATA DEL DÍA"
     if "VALOR" in plano or "ESPECIAL" in plano:
         return "VALOR"
+    # Solo el emoji: 💰 valor, ★ best bet, 🎥 en vivo
+    cab = plano.strip()[:3]
+    if "\U0001F4B0" in cab:
+        return "VALOR"
+    if "★" in cab or "⭐" in cab:
+        return "BEST BET"
+    if "\U0001F3A5" in cab:
+        return "LIVE"
     return None
 
 
@@ -1077,15 +1100,18 @@ def parsear_menu(texto):
         # Formato tabla: "1:10 PM  Belmont Park  C1  💰 VALOR · #5 True Adirondacker (5/1) jugamos 4nini"
         fila = _RE_FILA.match(cruda.strip())
         if fila:
-            hhmm, ampm, nombre_hip, carrera, parada = fila.groups()
+            hhmm, ampm, nombre_hip, carrera, parada_fila = fila.groups()
             hora = _hora_fila(hhmm, ampm)
-            etq = _etiqueta_de(_sin_acentos(parada))
-            mp = _RE_PICK_FILA.search(parada) or _RE_PICK_SIN_ML.search(parada)
-            if etq and mp:
+            # "★ #8 Aperitif · ✖ RF #3 Sacred Goddess": dos paradas en la misma fila
+            for parada in _re.split(r"\s+·\s+(?=[✖💰★⭐🎥])", parada_fila):
+              etq = _etiqueta_de(_sin_acentos(parada))
+              mp = _RE_PICK_FILA.search(parada) or _RE_PICK_SIN_ML.search(parada)
+              if etq and mp:
                 # "2:10 (3:10)  Belmont": la hora de Caracas entre parentesis no es parte del hipodromo
                 nombre_hip = _re.sub(r"^\(?\s*\d{1,2}:\d{2}\s*(?:[AaPp]\.?\s*[Mm]\.?)?\s*\)?\s*", "",
                                      nombre_hip.strip()).strip(" \t·|")
                 nombre_hip = _re.sub(r"[^\w\s'.&-]", "", nombre_hip).strip()
+                nombre_hip = HIPODROMOS_COD.get(nombre_hip.upper(), nombre_hip)
                 actual = next((h for h in hipodromos if h["nombre"].lower() == nombre_hip.lower()), None)
                 if actual is None:
                     actual = {"nombre": nombre_hip, "items": []}
@@ -1104,7 +1130,8 @@ def parsear_menu(texto):
             continue
         # Linea de detalle "C7 #11 Mad Mo (8/1) · 3:55 PM ET ... · grama": solo aporta el ML que faltaba
         if ultimo is not None:
-            md = _re.search(r"#\s*(\d+)\s+.+?\(\s*(\d+\s*[/-]\s*\d+)\s*\)", linea)
+            md = (_re.search(r"#\s*(\d+)\s+.+?\(\s*(\d+\s*[/-]\s*\d+)\s*\)", linea)
+                  or _re.search(r"^\s*#\s*(\d+)\s+.+?·\s*ML\s*(\d+\s*[/-]\s*\d+)", linea))
             if md and md.group(1) == ultimo["numero"]:
                 if not ultimo["ml"]:
                     ultimo["ml"] = md.group(2).replace(" ", "")
@@ -1122,7 +1149,9 @@ def parsear_menu(texto):
         if (ultimo is not None and ultimo["etiqueta"] == "VALOR" and not linea.startswith("\U0001F3C7")
                 and "\u23F0" not in linea and _etiqueta_de(plano) is None and "HOY NO HAY" not in plano
                 and "ESTA LISTA" not in plano and "PARA EL GRUPO VIP" not in plano):
-            ultimo["resena"] = (ultimo["resena"] + " " + linea).strip()
+            # viñetas ✅ / ⚠️ van cada una en su linea
+            sep = "\n" if _re.match(r"^\s*(✅|⚠|•|-\s)", linea) else " "
+            ultimo["resena"] = (ultimo["resena"] + sep + linea.strip()).strip()
             continue
         if linea.startswith("\U0001F3C7"):
             actual = {"nombre": linea.lstrip("\U0001F3C7").strip(), "items": []}
@@ -1208,7 +1237,8 @@ def menu_publico(menu, nota, fecha, valor):
     """1) Menu para el grupo gratis: etiquetas y horas SIN nombre ni numero del ejemplar."""
     dia = menu["dia"] or DIAS[fecha.weekday()]
     nombres = {"BEST BET": "⭐ BEST BET", "VALOR": "\U0001F48E\U0001F4B0 ESPECIAL ALTO DIVIDENDO",
-               "RATA DEL DÍA": "\U0001F400 RATA DEL DÍA", "RATA FUERTE": "\U0001F400\U0001F525 RATA FUERTE"}
+               "RATA DEL DÍA": "\U0001F400 RATA DEL DÍA", "RATA FUERTE": "\U0001F400\U0001F525 RATA FUERTE",
+               "LIVE": "\U0001F3A5 EN EL LIVE"}
     bloques = []
     for h in menu["hipodromos"]:
         filas = [f"\U0001F3C7 <u><b>{esc(h['nombre'].upper())}</b></u>"]
@@ -1234,6 +1264,8 @@ def picks_menu(menu):
                 etq = "ESPECIAL ALTO DIVIDENDO"
             elif i["etiqueta"] == "BEST BET":
                 etq = f"BEST BET {h['nombre'].upper()}"
+            elif i["etiqueta"] == "LIVE":
+                etq = "EN EL LIVE"
             else:
                 etq = "RATAS DEL DÍA" if i["etiqueta"] == "RATA DEL DÍA" else "RATA FUERTE"
             destino = "vip"
