@@ -963,7 +963,7 @@ _RE_PICK_FILA = _re.compile(r"#\s*(\d+)\s+(.+?)\s*(?:\(\s*(\d+\s*[/-]\s*\d+)\s*\
 # Ejemplar sin ML: "#4 Mad Banker<TAB>💰 VALOR jugamos..." (el nombre termina en tab, doble espacio o la etiqueta)
 _RE_PICK_SIN_ML = _re.compile(
     r"#\s*(\d+)\s+([^\t✖💰★⭐🎥]+?)\s*(?:\t|\s{2,}|(?=[✖💰★⭐🎥])|"
-    r"(?=(?:a\s+)?(?:dar[eé]?|darle|daremos|damos|jug\w*|vamos|marcamos|parada\s*fre+e?)\b)|$)\s*(.*)$", _re.I)
+    r"(?=(?:(?<!\w)a\s+)?(?:dar[eé]?|darle|daremos|damos|jug\w*|vamos|marcamos|parada\s*fre+e?)\b)|$)\s*(.*)$", _re.I)
 
 # Codigos de hipodromo (Equibase)
 HIPODROMOS_COD = {
@@ -1103,7 +1103,7 @@ def parsear_menu(texto):
             hhmm, ampm, nombre_hip, carrera, parada_fila = fila.groups()
             hora = _hora_fila(hhmm, ampm)
             # "★ #8 Aperitif · ✖ RF #3 Sacred Goddess": dos paradas en la misma fila
-            for parada in _re.split(r"\s+·\s+(?=[✖💰★⭐🎥])", parada_fila):
+            for parada in _re.split(r"\s+·\s+(?=[✖💰★⭐🎥]|RF\b|rata\b)", parada_fila, flags=_re.I):
               etq = _etiqueta_de(_sin_acentos(parada))
               mp = _RE_PICK_FILA.search(parada) or _RE_PICK_SIN_ML.search(parada)
               if etq and mp:
