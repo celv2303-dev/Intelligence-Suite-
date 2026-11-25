@@ -1103,6 +1103,7 @@ def parsear_menu(texto):
             hhmm, ampm, nombre_hip, carrera, parada_fila = fila.groups()
             hora = _hora_fila(hhmm, ampm)
             # "★ #8 Aperitif · ✖ RF #3 Sacred Goddess": dos paradas en la misma fila
+            de_fila = []
             for parada in _re.split(r"\s+·\s+(?=[✖💰★⭐🎥]|RF\b|rata\b)", parada_fila, flags=_re.I):
               etq = _etiqueta_de(_sin_acentos(parada))
               mp = _RE_PICK_FILA.search(parada) or _RE_PICK_SIN_ML.search(parada)
@@ -1126,7 +1127,16 @@ def parsear_menu(texto):
                     ultimo["free"] = mfree.group(1) or str(1 + sum(1 for hh in hipodromos for it in hh["items"] if it.get("free")))
                     ultimo["tipo"] = _re.sub(r"parada\s*fre+e?\s*\d*", "", ultimo["tipo"], flags=_re.I).strip(" ·-|:,\t")
                 actual["items"].append(ultimo)
+                de_fila.append(ultimo)
                 etiqueta = etq
+            # "💰 #7 Enticing Moves 10/1 · ✖ RF #3 Fraud Alert jugamos 5 puesto": la jugada es del VALOR
+            val = next((it for it in de_fila if it["etiqueta"] == "VALOR"), None)
+            if val is not None and len(de_fila) > 1:
+                otro = de_fila[-1]
+                if (not val["tipo"] and otro is not val
+                        and _re.search(r"puesto|nini|jug|marc", otro["tipo"], _re.I)):
+                    val["tipo"], otro["tipo"] = otro["tipo"], ""
+                ultimo = val  # la reseña de abajo es del VALOR
             continue
         # Linea de detalle "C7 #11 Mad Mo (8/1) · 3:55 PM ET ... · grama": solo aporta el ML que faltaba
         if ultimo is not None:
