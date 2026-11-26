@@ -1061,10 +1061,32 @@ def parsear_menu(texto):
     etiqueta = None
     ultimo = None
     for cruda in (texto or "").splitlines():
+        # "2b  11:44 (12:44)  Gulfstream  2  $ VALOR  #5 Just Majestic 5/1": columna # y carrera sin "C"
+        mn = _re.match(r"^\s*\d{1,2}[a-z]?\s+(\d{1,2}:\d{2}\s*\(\s*\d{1,2}:\d{2}\s*\))\s+(.+?)\s+(\d{1,2})\s+(.*#\s*\d+.*)$", cruda, _re.I)
+        if mn:
+            cruda = f"{mn.group(1)}\t{mn.group(2)}\tC{mn.group(3)}\t{mn.group(4)}"
         linea = _limpiar_linea(cruda)
         if not linea:
             continue
         plano = _sin_acentos(linea)
+        # Debajo de un VALOR: "💎 VALOR VIP marcamos 4puesto" o "#1 HERE COMES (ML 5/1) marcamos 4p": aporta la jugada
+        if ultimo is not None and ultimo["etiqueta"] == "VALOR":
+            mj = None
+            if plano.lstrip("\U0001F48E ").startswith("VALOR VIP"):
+                mj = _re.sub(r"^.*?VALOR\s+VIP", "", linea, flags=_re.I)
+            else:
+                mnum = _re.match(r"^\s*#\s*(\d+)\s+[^(]*\(\s*(?:ML\s*)?(\d+\s*[/-]\s*\d+)\s*\)\s*(.*)$", linea, _re.I)
+                if mnum and mnum.group(1) == ultimo["numero"]:
+                    if not ultimo["ml"]:
+                        ultimo["ml"] = mnum.group(2).replace(" ", "")
+                    mj = mnum.group(3)
+            if mj is not None:
+                mj = _re.sub(r"·[^·]*\b(?:C\d+|ET|CARACAS)\b[^·]*", " ", mj, flags=_re.I)
+                mj = _re.sub(r"\b(?:DEL MAR|BELMONT|GULFSTREAM|CHURCHILL|SANTA ANITA)\b", " ", mj, flags=_re.I)
+                mj = mj.strip(" ·-|:,\t")
+                if mj and not ultimo["tipo"]:
+                    ultimo["tipo"] = mj
+                continue
         # Encabezado de hipodromo: "PARADAS · CHURCHILL DOWNS" (sin dia de la semana)
         mh = _re.match(r"^\s*(?:\U0001F3C7\s*)?PARADAS\s*[·:\-]\s*(.+)$", plano)
         if mh and not any(d in mh.group(1) for d in ("LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO")):
