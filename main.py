@@ -1069,6 +1069,21 @@ def parsear_menu(texto):
         if not linea:
             continue
         plano = _sin_acentos(linea)
+        # Encabezado de tabla repetido: "#  Hora ET (Caracas)  Hipódromo  C  Etiqueta  Caballo"
+        if _re.match(r"^#\s+HORA\b", plano):
+            continue
+        # Debajo de una RATA: "JUGADA: DAR PAGO." es su jugada (y las lineas de detalle no son reseña)
+        if ultimo is not None and ultimo["etiqueta"] != "VALOR" and "#" not in linea and _re.search(
+                r"·\s*C\s*" + ultimo["carrera"] + r"\s*·", plano) and _etiqueta_de(plano):
+            continue  # "✖ RATA FUERTE · BELMONT PARK · C7 · 2:38 ET": repite la fila
+        if ultimo is not None and ultimo["etiqueta"] != "VALOR" and _re.match(r"^#\s*" + ultimo["numero"] + r"\b", linea):
+            continue  # "#8 THREE THIRTEEN (ML 8/1) · FAVORITO"
+        if ultimo is not None and ultimo["etiqueta"] != "VALOR" and "MISMA CARRERA" in plano:
+            continue  # "EN LA MISMA CARRERA VA NUESTRO BEST BET #1 ...": comentario, no es otra parada
+        if ultimo is not None and ultimo["etiqueta"] != "VALOR" and plano.startswith("JUGADA"):
+            if not ultimo["tipo"]:
+                ultimo["tipo"] = _re.sub(r"^\s*jugada\s*:?\s*", "", linea, flags=_re.I).strip(" .").lower()
+            continue
         # Debajo de un VALOR: "💎 VALOR VIP marcamos 4puesto" o "#1 HERE COMES (ML 5/1) marcamos 4p": aporta la jugada
         if ultimo is not None and ultimo["etiqueta"] == "VALOR":
             mj = None
@@ -1081,8 +1096,9 @@ def parsear_menu(texto):
                         ultimo["ml"] = mnum.group(2).replace(" ", "")
                     mj = mnum.group(3)
             if mj is not None:
-                mj = _re.sub(r"·[^·]*\b(?:C\d+|ET|CARACAS)\b[^·]*", " ", mj, flags=_re.I)
-                mj = _re.sub(r"\b(?:DEL MAR|BELMONT|GULFSTREAM|CHURCHILL|SANTA ANITA)\b", " ", mj, flags=_re.I)
+                # "· BELMONT PARK · C4 · 1:08 ET (2:08 Caracas)": solo queda el trozo con la jugada
+                mj = " · ".join(t.strip() for t in mj.split("·")
+                                if _re.search(r"jug|marc|puesto|nini|\d\s*p\b|dar", t, _re.I))
                 mj = mj.strip(" ·-|:,\t")
                 if mj and not ultimo["tipo"]:
                     ultimo["tipo"] = mj
