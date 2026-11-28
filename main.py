@@ -1097,6 +1097,7 @@ def parsear_menu(texto):
                     mj = mnum.group(3)
             if mj is not None:
                 # "· BELMONT PARK · C4 · 1:08 ET (2:08 Caracas)": solo queda el trozo con la jugada
+                mj = _re.sub(r"\d{1,2}:\d{2}\s*(?:[AP]M\s*)?ET\b\s*(?:\([^)]*\))?", " ", mj, flags=_re.I)
                 mj = " · ".join(t.strip() for t in mj.split("·")
                                 if _re.search(r"jug|marc|puesto|nini|\d\s*p\b|dar", t, _re.I))
                 mj = mj.strip(" ·-|:,\t")
